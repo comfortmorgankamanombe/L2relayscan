@@ -12,6 +12,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetchDashboardData, type RelayStatus } from "@/lib/fetch-relays"
 import { RefreshButton } from "@/components/refresh-button"
+import { LiveClock } from "@/components/live-clock"
 import {
   Activity,
   AlertTriangle,
@@ -95,11 +96,6 @@ function shortKey(pubkey: string): string {
   return `${pubkey.slice(0, 6)}…${pubkey.slice(-4)}`
 }
 
-function timeAgo(fetchedAt: string, slotIndex: number): string {
-  const secondsAgo = slotIndex * 12
-  if (secondsAgo < 60) return `${secondsAgo}s ago`
-  return `${Math.floor(secondsAgo / 60)}m ${secondsAgo % 60}s ago`
-}
 
 export default async function Dashboard() {
   const data = await fetchDashboardData()
@@ -136,8 +132,8 @@ export default async function Dashboard() {
             </Badge>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="hidden md:flex items-center gap-4 text-sm text-muted-foreground">
+          <div className="flex items-center gap-3">
+            <div className="hidden md:flex items-center gap-3 text-sm text-muted-foreground">
               <div className="flex items-center gap-1.5">
                 <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
@@ -146,19 +142,30 @@ export default async function Dashboard() {
                 <span className="text-emerald-400 font-medium text-xs">LIVE</span>
               </div>
               <Separator orientation="vertical" className="h-4 opacity-40" />
+              <LiveClock />
+              <Separator orientation="vertical" className="h-4 opacity-40" />
               {latestBlock && (
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 text-xs">
                   <Blocks className="h-3.5 w-3.5" />
                   <span>Block #{latestBlock.toLocaleString()}</span>
                 </div>
               )}
               {latestSlot && (
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 text-xs">
                   <Clock className="h-3.5 w-3.5" />
                   <span>Slot {latestSlot.toLocaleString()}</span>
                 </div>
               )}
             </div>
+            <Separator orientation="vertical" className="h-5 opacity-40 hidden md:block" />
+            <a
+              href="https://github.com/comfortmorgankamanombe/L2relayscan/issues/new?title=Add+Relay+Request&body=Relay+Name:%0AStatus+Endpoint:%0ANetwork+(Base/ETH/Arbitrum):%0AContact:"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-md border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/20 hover:border-primary/60"
+            >
+              + Submit Relay
+            </a>
             <RefreshButton />
           </div>
         </div>
@@ -354,7 +361,7 @@ export default async function Dashboard() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {data.recentBlocks.map((block, i) => (
+                      {data.recentBlocks.map((block) => (
                         <TableRow
                           key={block.block_hash}
                           className="border-border/40 hover:bg-muted/30 transition-colors"
