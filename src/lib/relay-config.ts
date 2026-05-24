@@ -5,6 +5,16 @@ export const RELAYS = [
     url: "https://relay.ultrasound.money",
   },
   {
+    name: "Titan Relay",
+    slug: "titan",
+    url: "https://titanrelay.xyz",
+  },
+  {
+    name: "BloXroute Max Profit",
+    slug: "bloxroute-max",
+    url: "https://bloxroute.max-profit.blxrbdn.com",
+  },
+  {
     name: "Agnostic Gnosis",
     slug: "agnostic",
     url: "https://agnostic-relay.net",
