@@ -1,6 +1,6 @@
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Separator } from "@/components/ui/separator"
 import {
   Table,
   TableBody,
@@ -8,11 +8,13 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { networkStats, relays, recentBlocks, type RelayStatus } from "@/lib/data";
+} from "@/components/ui/table"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { fetchDashboardData, type RelayStatus } from "@/lib/fetch-relays"
+import { RefreshButton } from "@/components/refresh-button"
 import {
   Activity,
+  AlertTriangle,
   Blocks,
   CircleDot,
   Clock,
@@ -21,8 +23,9 @@ import {
   TrendingUp,
   Wifi,
   WifiOff,
-  AlertTriangle,
-} from "lucide-react";
+} from "lucide-react"
+
+export const dynamic = "force-dynamic"
 
 function StatusBadge({ status }: { status: RelayStatus }) {
   if (status === "online") {
@@ -34,22 +37,14 @@ function StatusBadge({ status }: { status: RelayStatus }) {
         </span>
         Online
       </Badge>
-    );
-  }
-  if (status === "degraded") {
-    return (
-      <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 gap-1.5 font-medium">
-        <AlertTriangle className="h-3 w-3" />
-        Degraded
-      </Badge>
-    );
+    )
   }
   return (
     <Badge className="bg-red-500/15 text-red-400 border-red-500/30 gap-1.5 font-medium">
       <WifiOff className="h-3 w-3" />
       Offline
     </Badge>
-  );
+  )
 }
 
 function StatCard({
@@ -57,13 +52,11 @@ function StatCard({
   value,
   sub,
   icon: Icon,
-  accent,
 }: {
-  title: string;
-  value: string;
-  sub?: string;
-  icon: React.ElementType;
-  accent?: string;
+  title: string
+  value: string
+  sub?: string
+  icon: React.ElementType
 }) {
   return (
     <Card className="border-border/50 bg-card/60 backdrop-blur-sm">
@@ -71,39 +64,59 @@ function StatCard({
         <CardTitle className="text-sm font-medium text-muted-foreground">
           {title}
         </CardTitle>
-        <div className={`p-2 rounded-md bg-primary/10 ${accent ?? ""}`}>
+        <div className="p-2 rounded-md bg-primary/10">
           <Icon className="h-4 w-4 text-primary" />
         </div>
       </CardHeader>
       <CardContent>
         <div className="text-2xl font-bold tracking-tight">{value}</div>
-        {sub && (
-          <p className="text-xs text-muted-foreground mt-1">{sub}</p>
-        )}
+        {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
       </CardContent>
     </Card>
-  );
+  )
 }
 
 function GasBar({ used, limit }: { used: number; limit: number }) {
-  const pct = Math.round((used / limit) * 100);
+  const pct = limit > 0 ? Math.round((used / limit) * 100) : 0
   const color =
-    pct > 95 ? "bg-red-500" : pct > 80 ? "bg-amber-500" : "bg-primary";
+    pct > 95 ? "bg-red-500" : pct > 80 ? "bg-amber-500" : "bg-primary"
   return (
     <div className="flex items-center gap-2 min-w-[80px]">
       <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full ${color}`}
-          style={{ width: `${pct}%` }}
-        />
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
       </div>
       <span className="text-xs text-muted-foreground w-8 text-right">{pct}%</span>
     </div>
-  );
+  )
 }
 
-export default function Dashboard() {
-  const totalOnline = relays.filter((r) => r.status === "online").length;
+function shortKey(pubkey: string): string {
+  if (!pubkey || pubkey.length < 12) return pubkey
+  return `${pubkey.slice(0, 6)}…${pubkey.slice(-4)}`
+}
+
+function timeAgo(fetchedAt: string, slotIndex: number): string {
+  const secondsAgo = slotIndex * 12
+  if (secondsAgo < 60) return `${secondsAgo}s ago`
+  return `${Math.floor(secondsAgo / 60)}m ${secondsAgo % 60}s ago`
+}
+
+export default async function Dashboard() {
+  const data = await fetchDashboardData()
+
+  const latestBlock = data.recentBlocks[0]?.block_number
+    ? parseInt(data.recentBlocks[0].block_number, 10)
+    : null
+
+  const latestSlot = data.recentBlocks[0]?.slot
+    ? parseInt(data.recentBlocks[0].slot, 10)
+    : null
+
+  const fetchedTime = new Date(data.fetchedAt).toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  })
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -123,23 +136,30 @@ export default function Dashboard() {
             </Badge>
           </div>
 
-          <div className="flex items-center gap-4 text-sm text-muted-foreground">
-            <div className="flex items-center gap-1.5">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
-              </span>
-              <span className="text-emerald-400 font-medium text-xs">LIVE</span>
+          <div className="flex items-center gap-4">
+            <div className="hidden md:flex items-center gap-4 text-sm text-muted-foreground">
+              <div className="flex items-center gap-1.5">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
+                </span>
+                <span className="text-emerald-400 font-medium text-xs">LIVE</span>
+              </div>
+              <Separator orientation="vertical" className="h-4 opacity-40" />
+              {latestBlock && (
+                <div className="flex items-center gap-1.5">
+                  <Blocks className="h-3.5 w-3.5" />
+                  <span>Block #{latestBlock.toLocaleString()}</span>
+                </div>
+              )}
+              {latestSlot && (
+                <div className="flex items-center gap-1.5">
+                  <Clock className="h-3.5 w-3.5" />
+                  <span>Slot {latestSlot.toLocaleString()}</span>
+                </div>
+              )}
             </div>
-            <Separator orientation="vertical" className="h-4 opacity-40" />
-            <div className="flex items-center gap-1.5">
-              <Blocks className="h-3.5 w-3.5" />
-              <span>Block #{networkStats.latestBlock.toLocaleString()}</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Clock className="h-3.5 w-3.5" />
-              <span>Epoch {networkStats.epochNumber.toLocaleString()}</span>
-            </div>
+            <RefreshButton />
           </div>
         </div>
       </header>
@@ -147,39 +167,49 @@ export default function Dashboard() {
       {/* Main */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-8 space-y-8">
         {/* Page title */}
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            MEV Relay Dashboard
-          </h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            Real-time relay performance and block data · Last 24 hours
-          </p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">MEV Relay Dashboard</h1>
+            <p className="text-muted-foreground text-sm mt-1">
+              Live relay status and recent payload data · Fetched at {fetchedTime}
+            </p>
+          </div>
+          <div className="text-xs text-muted-foreground text-right hidden sm:block">
+            <div className="flex items-center gap-1.5 text-amber-400/80">
+              <AlertTriangle className="h-3 w-3" />
+              <span>Most recent ~50 blocks per relay</span>
+            </div>
+          </div>
         </div>
 
         {/* Stat cards */}
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <StatCard
-            title="Total Blocks (24h)"
-            value={networkStats.totalBlocks.toLocaleString()}
-            sub={`Epoch ${networkStats.epochNumber.toLocaleString()}`}
+            title="Unique Blocks (Feed)"
+            value={data.totalUniqueBlocks.toLocaleString()}
+            sub="Deduplicated across all relays"
             icon={Blocks}
           />
           <StatCard
-            title="Total Value Relayed"
-            value={`${networkStats.totalValueEth.toFixed(2)} ETH`}
-            sub="Across all active relays"
+            title="Total Value in Feed"
+            value={`${data.totalValueEth.toFixed(4)} ETH`}
+            sub="From deduplicated block set"
             icon={TrendingUp}
           />
           <StatCard
             title="Active Relays"
-            value={`${totalOnline} / ${networkStats.totalRelays}`}
-            sub={`${networkStats.totalRelays - totalOnline} offline or degraded`}
+            value={`${data.activeRelays} / ${data.relays.length}`}
+            sub={`${data.relays.length - data.activeRelays} offline or unreachable`}
             icon={Wifi}
           />
           <StatCard
-            title="Avg Winning Bid"
-            value={`${networkStats.avgBidEth.toFixed(4)} ETH`}
-            sub="Per block over 24h"
+            title="Avg Block Bid"
+            value={
+              data.avgBidEth > 0
+                ? `${data.avgBidEth.toFixed(6)} ETH`
+                : "—"
+            }
+            sub="Across recent unique blocks"
             icon={Activity}
           />
         </div>
@@ -197,16 +227,14 @@ export default function Dashboard() {
             </TabsTrigger>
           </TabsList>
 
-          {/* Relay Performance Table */}
+          {/* Relay Table */}
           <TabsContent value="relays" className="mt-4">
             <Card className="border-border/50 bg-card/60">
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-base font-semibold">
-                    Relay Performance
-                  </CardTitle>
+                  <CardTitle className="text-base font-semibold">Relay Status</CardTitle>
                   <span className="text-xs text-muted-foreground">
-                    {relays.length} relays tracked
+                    {data.relays.length} relays · status live-checked
                   </span>
                 </div>
               </CardHeader>
@@ -214,17 +242,10 @@ export default function Dashboard() {
                 <Table>
                   <TableHeader>
                     <TableRow className="border-border/50 hover:bg-transparent">
-                      <TableHead className="pl-6 text-xs font-medium text-muted-foreground">
-                        Relay
-                      </TableHead>
-                      <TableHead className="text-xs font-medium text-muted-foreground">
-                        Status
-                      </TableHead>
+                      <TableHead className="pl-6 text-xs font-medium text-muted-foreground">Relay</TableHead>
+                      <TableHead className="text-xs font-medium text-muted-foreground">Status</TableHead>
                       <TableHead className="text-xs font-medium text-muted-foreground text-right">
-                        Blocks Won
-                      </TableHead>
-                      <TableHead className="text-xs font-medium text-muted-foreground text-right">
-                        Win Rate
+                        Blocks in Feed
                       </TableHead>
                       <TableHead className="text-xs font-medium text-muted-foreground text-right">
                         Total Value
@@ -236,22 +257,20 @@ export default function Dashboard() {
                         Latency
                       </TableHead>
                       <TableHead className="pr-6 text-xs font-medium text-muted-foreground text-right">
-                        Last Block
+                        Latest Block
                       </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {relays.map((relay) => (
+                    {data.relays.map((relay) => (
                       <TableRow
                         key={relay.slug}
                         className="border-border/40 hover:bg-muted/30 transition-colors"
                       >
                         <TableCell className="pl-6 py-4">
                           <div>
-                            <div className="font-medium text-sm">
-                              {relay.name}
-                            </div>
-                            <div className="text-xs text-muted-foreground font-mono mt-0.5 truncate max-w-[200px]">
+                            <div className="font-medium text-sm">{relay.name}</div>
+                            <div className="text-xs text-muted-foreground font-mono mt-0.5 truncate max-w-[220px]">
                               {relay.url}
                             </div>
                           </div>
@@ -260,51 +279,40 @@ export default function Dashboard() {
                           <StatusBadge status={relay.status} />
                         </TableCell>
                         <TableCell className="text-right font-mono text-sm">
-                          {relay.blocksWon.toLocaleString()}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-primary rounded-full"
-                                style={{ width: `${relay.winRate}%` }}
-                              />
-                            </div>
-                            <span className="font-mono text-sm w-10 text-right">
-                              {relay.winRate.toFixed(1)}%
-                            </span>
-                          </div>
+                          {relay.blocksWon > 0 ? relay.blocksWon : (
+                            <span className="text-muted-foreground">0</span>
+                          )}
                         </TableCell>
                         <TableCell className="text-right font-mono text-sm">
                           {relay.totalValueEth > 0
-                            ? `${relay.totalValueEth.toFixed(2)} ETH`
+                            ? `${relay.totalValueEth.toFixed(4)} ETH`
                             : <span className="text-muted-foreground">—</span>}
                         </TableCell>
                         <TableCell className="text-right font-mono text-sm">
                           {relay.avgBidEth > 0
-                            ? `${relay.avgBidEth.toFixed(4)}`
+                            ? relay.avgBidEth.toFixed(6)
                             : <span className="text-muted-foreground">—</span>}
                         </TableCell>
                         <TableCell className="text-right">
                           {relay.latencyMs > 0 ? (
                             <span
                               className={`font-mono text-sm ${
-                                relay.latencyMs > 200
+                                relay.latencyMs > 500
+                                  ? "text-red-400"
+                                  : relay.latencyMs > 200
                                   ? "text-amber-400"
-                                  : relay.latencyMs > 100
-                                  ? "text-yellow-400"
                                   : "text-emerald-400"
                               }`}
                             >
                               {relay.latencyMs}ms
                             </span>
                           ) : (
-                            <span className="text-muted-foreground text-sm">—</span>
+                            <span className="text-muted-foreground text-sm">timeout</span>
                           )}
                         </TableCell>
                         <TableCell className="pr-6 text-right font-mono text-sm text-muted-foreground">
-                          {relay.lastBlock > 0
-                            ? `#${relay.lastBlock.toLocaleString()}`
+                          {relay.latestBlock
+                            ? `#${relay.latestBlock.toLocaleString()}`
                             : "—"}
                         </TableCell>
                       </TableRow>
@@ -320,84 +328,72 @@ export default function Dashboard() {
             <Card className="border-border/50 bg-card/60">
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-base font-semibold">
-                    Recent Blocks
-                  </CardTitle>
+                  <CardTitle className="text-base font-semibold">Recent Blocks</CardTitle>
                   <div className="flex items-center gap-1.5 text-xs text-emerald-400">
                     <CircleDot className="h-3 w-3 animate-pulse" />
-                    Streaming
+                    {data.recentBlocks.length} blocks · deduplicated
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="border-border/50 hover:bg-transparent">
-                      <TableHead className="pl-6 text-xs font-medium text-muted-foreground">
-                        Block
-                      </TableHead>
-                      <TableHead className="text-xs font-medium text-muted-foreground">
-                        Relay
-                      </TableHead>
-                      <TableHead className="text-xs font-medium text-muted-foreground">
-                        Builder
-                      </TableHead>
-                      <TableHead className="text-xs font-medium text-muted-foreground text-right">
-                        Value
-                      </TableHead>
-                      <TableHead className="text-xs font-medium text-muted-foreground">
-                        Gas Used
-                      </TableHead>
-                      <TableHead className="text-xs font-medium text-muted-foreground text-right">
-                        Txns
-                      </TableHead>
-                      <TableHead className="pr-6 text-xs font-medium text-muted-foreground text-right">
-                        Time
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {recentBlocks.map((block) => (
-                      <TableRow
-                        key={block.number}
-                        className="border-border/40 hover:bg-muted/30 transition-colors"
-                      >
-                        <TableCell className="pl-6 py-3.5">
-                          <span className="font-mono text-sm text-primary font-medium">
-                            #{block.number.toLocaleString()}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm font-medium">
-                            {block.relay}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <span className="font-mono text-xs text-muted-foreground bg-muted/50 px-2 py-0.5 rounded">
-                            {block.builderPubkey}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <span className="font-mono text-sm font-medium text-primary">
-                            {block.valueEth.toFixed(4)} ETH
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <GasBar
-                            used={block.gasUsed}
-                            limit={block.gasLimit}
-                          />
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-sm">
-                          {block.txCount}
-                        </TableCell>
-                        <TableCell className="pr-6 text-right text-xs text-muted-foreground">
-                          {block.timestamp}
-                        </TableCell>
+                {data.recentBlocks.length === 0 ? (
+                  <div className="py-16 text-center text-muted-foreground text-sm">
+                    No block data available yet
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-border/50 hover:bg-transparent">
+                        <TableHead className="pl-6 text-xs font-medium text-muted-foreground">Block</TableHead>
+                        <TableHead className="text-xs font-medium text-muted-foreground">Relay</TableHead>
+                        <TableHead className="text-xs font-medium text-muted-foreground">Builder</TableHead>
+                        <TableHead className="text-xs font-medium text-muted-foreground text-right">Value</TableHead>
+                        <TableHead className="text-xs font-medium text-muted-foreground">Gas Used</TableHead>
+                        <TableHead className="text-xs font-medium text-muted-foreground text-right">Txns</TableHead>
+                        <TableHead className="pr-6 text-xs font-medium text-muted-foreground text-right">Slot</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {data.recentBlocks.map((block, i) => (
+                        <TableRow
+                          key={block.block_hash}
+                          className="border-border/40 hover:bg-muted/30 transition-colors"
+                        >
+                          <TableCell className="pl-6 py-3.5">
+                            <span className="font-mono text-sm text-primary font-medium">
+                              #{parseInt(block.block_number, 10).toLocaleString()}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <span className="text-sm font-medium">{block.relayName}</span>
+                          </TableCell>
+                          <TableCell>
+                            <span className="font-mono text-xs text-muted-foreground bg-muted/50 px-2 py-0.5 rounded">
+                              {shortKey(block.builder_pubkey)}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <span className="font-mono text-sm font-medium text-primary">
+                              {block.valueEth.toFixed(6)} ETH
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <GasBar
+                              used={parseInt(block.gas_used, 10)}
+                              limit={parseInt(block.gas_limit, 10)}
+                            />
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm">
+                            {block.num_tx}
+                          </TableCell>
+                          <TableCell className="pr-6 text-right text-xs text-muted-foreground font-mono">
+                            {parseInt(block.slot, 10).toLocaleString()}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -409,11 +405,11 @@ export default function Dashboard() {
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between text-xs text-muted-foreground">
           <div className="flex items-center gap-1.5">
             <Cpu className="h-3.5 w-3.5" />
-            <span>L2RelayScan · Base Mainnet MEV Relay Monitor</span>
+            <span>L2RelayScan · MEV Relay Monitor</span>
           </div>
-          <span>Data refreshes every 2s · Chain ID 8453</span>
+          <span>Data sourced directly from relay APIs · Flashbots excluded (API incompatible)</span>
         </div>
       </footer>
     </div>
-  );
+  )
 }
