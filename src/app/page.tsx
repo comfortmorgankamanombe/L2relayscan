@@ -1,3 +1,6 @@
+"use client"
+
+import { useState, useEffect } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
@@ -10,7 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { fetchDashboardData, type RelayStatus } from "@/lib/fetch-relays"
+import { type RelayStatus, type DashboardData } from "@/lib/fetch-relays"
 import { RefreshButton } from "@/components/refresh-button"
 import { LiveClock } from "@/components/live-clock"
 import {
@@ -25,8 +28,6 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react"
-
-export const dynamic = "force-dynamic"
 
 function StatusBadge({ status }: { status: RelayStatus }) {
   if (status === "online") {
@@ -97,8 +98,39 @@ function shortKey(pubkey: string): string {
 }
 
 
-export default async function Dashboard() {
-  const data = await fetchDashboardData()
+const defaultData: DashboardData = {
+  relays: [],
+  recentBlocks: [],
+  totalUniqueBlocks: 0,
+  totalValueEth: 0,
+  activeRelays: 0,
+  avgBidEth: 0,
+  fetchedAt: new Date().toISOString(),
+}
+
+export default function Dashboard() {
+  const [data, setData] = useState<DashboardData>(defaultData)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetchData = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const response = await fetch("/api/relay-stats")
+      if (!response.ok) throw new Error("Failed to fetch relay stats")
+      const newData: DashboardData = await response.json()
+      setData(newData)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error occurred")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchData()
+  }, [])
 
   const latestBlock = data.recentBlocks[0]?.block_number
     ? parseInt(data.recentBlocks[0].block_number, 10)
@@ -166,13 +198,44 @@ export default async function Dashboard() {
             >
               + Submit Relay
             </a>
-            <RefreshButton />
+            <RefreshButton onRefresh={fetchData} />
           </div>
         </div>
       </header>
 
       {/* Main */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-8 space-y-8">
+        {error && (
+          <Card className="border-red-500/50 bg-red-500/10">
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="h-5 w-5 text-red-400 flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-red-400">Error fetching relay data</p>
+                  <p className="text-xs text-red-400/70 mt-1">{error}</p>
+                </div>
+                <button
+                  onClick={fetchData}
+                  className="text-xs font-medium text-red-400 hover:text-red-300 px-3 py-1 rounded hover:bg-red-500/20 transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {loading ? (
+          <div className="flex items-center justify-center py-20">
+            <div className="flex flex-col items-center gap-4">
+              <div className="relative flex h-12 w-12">
+                <div className="animate-spin absolute inline-flex h-full w-full rounded-full border-4 border-primary/30 border-t-primary" />
+              </div>
+              <p className="text-sm text-muted-foreground">Loading relay data from Frankfurt…</p>
+            </div>
+          </div>
+        ) : (
+          <>
         {/* Page title */}
         <div className="flex items-start justify-between">
           <div>
@@ -405,6 +468,8 @@ export default async function Dashboard() {
             </Card>
           </TabsContent>
         </Tabs>
+          </>
+        )}
       </main>
 
       {/* Footer */}

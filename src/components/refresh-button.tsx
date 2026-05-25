@@ -1,20 +1,29 @@
 "use client"
 
-import { useRouter } from "next/navigation"
-import { useState, useTransition } from "react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { RefreshCw } from "lucide-react"
 
-export function RefreshButton() {
-  const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+interface RefreshButtonProps {
+  onRefresh?: () => Promise<void>
+}
+
+export function RefreshButton({ onRefresh }: RefreshButtonProps) {
+  const [isPending, setIsPending] = useState(false)
   const [lastRefreshed, setLastRefreshed] = useState<string | null>(null)
 
-  function handleRefresh() {
-    startTransition(() => {
-      router.refresh()
+  async function handleRefresh() {
+    try {
+      setIsPending(true)
+      if (onRefresh) {
+        await onRefresh()
+      }
       setLastRefreshed(new Date().toLocaleTimeString())
-    })
+    } catch (error) {
+      console.error("Refresh failed:", error)
+    } finally {
+      setIsPending(false)
+    }
   }
 
   return (
