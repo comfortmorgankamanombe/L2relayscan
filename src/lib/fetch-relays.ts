@@ -1,4 +1,4 @@
-import { RELAYS } from "./relay-config"
+import { RELAYS, type ChainType } from "./relay-config"
 
 export type RelayStatus = "online" | "offline"
 
@@ -19,6 +19,7 @@ export interface RelayResult {
   name: string
   slug: string
   url: string
+  chain: ChainType
   status: RelayStatus
   latencyMs: number
   blocksWon: number
@@ -29,11 +30,13 @@ export interface RelayResult {
 
 export interface RecentBlock extends RelayPayload {
   relayName: string
+  chain: ChainType
   valueEth: number
 }
 
 export interface DashboardData {
-  relays: RelayResult[]
+  ethereumRelays: RelayResult[]
+  arbitrumRelays: RelayResult[]
   recentBlocks: RecentBlock[]
   totalUniqueBlocks: number
   totalValueEth: number
@@ -48,7 +51,7 @@ function weiToEth(wei: string): number {
   return n / 1e18
 }
 
-async function probeStatus(url: string): Promise<{ status: RelayStatus; latencyMs: number }> {
+async function probeStatus(url: string, chain: ChainType): Promise<{ status: RelayStatus; latencyMs: number }> {
   const start = Date.now()
   try {
     const res = await fetch(`${url}/eth/v1/builder/status`, {
@@ -64,7 +67,7 @@ async function probeStatus(url: string): Promise<{ status: RelayStatus; latencyM
   }
 }
 
-async function fetchPayloads(url: string): Promise<RelayPayload[]> {
+async function fetchPayloads(url: string, chain: ChainType): Promise<RelayPayload[]> {
   try {
     const res = await fetch(
       `${url}/relay/v1/data/bidtraces/proposer_payload_delivered?limit=50`,
@@ -82,8 +85,8 @@ export async function fetchDashboardData(): Promise<DashboardData> {
   const relayResults = await Promise.all(
     RELAYS.map(async (relay) => {
       const [probe, payloads] = await Promise.all([
-        probeStatus(relay.url),
-        fetchPayloads(relay.url),
+        probeStatus(relay.url, relay.chain),
+        fetchPayloads(relay.url, relay.chain),
       ])
 
       const totalValueEth = payloads.reduce((sum, p) => sum + weiToEth(p.value), 0)
@@ -102,6 +105,7 @@ export async function fetchDashboardData(): Promise<DashboardData> {
           name: relay.name,
           slug: relay.slug,
           url: relay.url,
+          chain: relay.chain,
           status: probe.status,
           latencyMs: probe.latencyMs,
           blocksWon,
@@ -120,7 +124,7 @@ export async function fetchDashboardData(): Promise<DashboardData> {
       const existing = blockMap.get(p.block_hash)
       const valueEth = weiToEth(p.value)
       if (!existing || valueEth > existing.valueEth) {
-        blockMap.set(p.block_hash, { ...p, relayName: relay.name, valueEth })
+        blockMap.set(p.block_hash, { ...p, relayName: relay.name, chain: relay.chain, valueEth })
       }
     }
   }
@@ -132,14 +136,18 @@ export async function fetchDashboardData(): Promise<DashboardData> {
   const totalUniqueBlocks = blockMap.size
   const totalValueEth = recentBlocks.reduce((sum, b) => sum + b.valueEth, 0)
   const avgBidEth = recentBlocks.length > 0 ? totalValueEth / recentBlocks.length : 0
-  const activeRelays = relayResults.filter((r) => r.probe.status === "online").length
 
-  const relays = relayResults
+  const allResults = relayResults
     .map((r) => r.result)
     .sort((a, b) => b.blocksWon - a.blocksWon)
 
+  const ethereumRelays = allResults.filter((r) => r.chain === "ethereum")
+  const arbitrumRelays = allResults.filter((r) => r.chain === "arbitrum")
+  const activeRelays = allResults.filter((r) => r.status === "online").length
+
   return {
-    relays,
+    ethereumRelays,
+    arbitrumRelays,
     recentBlocks,
     totalUniqueBlocks,
     totalValueEth,

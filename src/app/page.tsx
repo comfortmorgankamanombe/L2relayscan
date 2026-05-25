@@ -99,7 +99,8 @@ function shortKey(pubkey: string): string {
 
 
 const defaultData: DashboardData = {
-  relays: [],
+  ethereumRelays: [],
+  arbitrumRelays: [],
   recentBlocks: [],
   totalUniqueBlocks: 0,
   totalValueEth: 0,
@@ -268,8 +269,8 @@ export default function Dashboard() {
           />
           <StatCard
             title="Active Relays"
-            value={`${data.activeRelays} / ${data.relays.length}`}
-            sub={`${data.relays.length - data.activeRelays} offline or unreachable`}
+            value={`${data.activeRelays} / ${data.ethereumRelays.length + data.arbitrumRelays.length}`}
+            sub={`${data.ethereumRelays.length + data.arbitrumRelays.length - data.activeRelays} offline or unreachable`}
             icon={Wifi}
           />
           <StatCard
@@ -298,97 +299,214 @@ export default function Dashboard() {
           </TabsList>
 
           {/* Relay Table */}
-          <TabsContent value="relays" className="mt-4">
+          <TabsContent value="relays" className="mt-4 space-y-6">
+            {/* Ethereum Relays */}
             <Card className="border-border/50 bg-card/60">
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-base font-semibold">Relay Status</CardTitle>
+                  <div className="flex items-center gap-2">
+                    <span className="text-base font-semibold">Ethereum Mainnet Relays</span>
+                    <Badge className="bg-blue-500/15 text-blue-400 border-blue-500/30 text-xs">
+                      Base, ETH
+                    </Badge>
+                  </div>
                   <span className="text-xs text-muted-foreground">
-                    {data.relays.length} relays · status live-checked
+                    {data.ethereumRelays.length} relays · status live-checked
                   </span>
                 </div>
               </CardHeader>
               <CardContent className="p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="border-border/50 hover:bg-transparent">
-                      <TableHead className="pl-6 text-xs font-medium text-muted-foreground">Relay</TableHead>
-                      <TableHead className="text-xs font-medium text-muted-foreground">Status</TableHead>
-                      <TableHead className="text-xs font-medium text-muted-foreground text-right">
-                        Blocks in Feed
-                      </TableHead>
-                      <TableHead className="text-xs font-medium text-muted-foreground text-right">
-                        Total Value
-                      </TableHead>
-                      <TableHead className="text-xs font-medium text-muted-foreground text-right">
-                        Avg Bid
-                      </TableHead>
-                      <TableHead className="text-xs font-medium text-muted-foreground text-right">
-                        Latency
-                      </TableHead>
-                      <TableHead className="pr-6 text-xs font-medium text-muted-foreground text-right">
-                        Latest Block
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data.relays.map((relay) => (
-                      <TableRow
-                        key={relay.slug}
-                        className="border-border/40 hover:bg-muted/30 transition-colors"
-                      >
-                        <TableCell className="pl-6 py-4">
-                          <div>
-                            <div className="font-medium text-sm">{relay.name}</div>
-                            <div className="text-xs text-muted-foreground font-mono mt-0.5 truncate max-w-[220px]">
-                              {relay.url}
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <StatusBadge status={relay.status} />
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-sm">
-                          {relay.blocksWon > 0 ? relay.blocksWon : (
-                            <span className="text-muted-foreground">0</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-sm">
-                          {relay.totalValueEth > 0
-                            ? `${relay.totalValueEth.toFixed(4)} ETH`
-                            : <span className="text-muted-foreground">—</span>}
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-sm">
-                          {relay.avgBidEth > 0
-                            ? relay.avgBidEth.toFixed(6)
-                            : <span className="text-muted-foreground">—</span>}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {relay.latencyMs > 0 ? (
-                            <span
-                              className={`font-mono text-sm ${
-                                relay.latencyMs > 500
-                                  ? "text-red-400"
-                                  : relay.latencyMs > 200
-                                  ? "text-amber-400"
-                                  : "text-emerald-400"
-                              }`}
-                            >
-                              {relay.latencyMs}ms
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground text-sm">timeout</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="pr-6 text-right font-mono text-sm text-muted-foreground">
-                          {relay.latestBlock
-                            ? `#${relay.latestBlock.toLocaleString()}`
-                            : "—"}
-                        </TableCell>
+                {data.ethereumRelays.length === 0 ? (
+                  <div className="py-8 text-center text-muted-foreground text-sm">
+                    No Ethereum relays configured
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-border/50 hover:bg-transparent">
+                        <TableHead className="pl-6 text-xs font-medium text-muted-foreground">Relay</TableHead>
+                        <TableHead className="text-xs font-medium text-muted-foreground">Status</TableHead>
+                        <TableHead className="text-xs font-medium text-muted-foreground text-right">
+                          Blocks in Feed
+                        </TableHead>
+                        <TableHead className="text-xs font-medium text-muted-foreground text-right">
+                          Total Value
+                        </TableHead>
+                        <TableHead className="text-xs font-medium text-muted-foreground text-right">
+                          Avg Bid
+                        </TableHead>
+                        <TableHead className="text-xs font-medium text-muted-foreground text-right">
+                          Latency
+                        </TableHead>
+                        <TableHead className="pr-6 text-xs font-medium text-muted-foreground text-right">
+                          Latest Block
+                        </TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {data.ethereumRelays.map((relay) => (
+                        <TableRow
+                          key={relay.slug}
+                          className="border-border/40 hover:bg-muted/30 transition-colors"
+                        >
+                          <TableCell className="pl-6 py-4">
+                            <div>
+                              <div className="font-medium text-sm">{relay.name}</div>
+                              <div className="text-xs text-muted-foreground font-mono mt-0.5 truncate max-w-55">
+                                {relay.url}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge status={relay.status} />
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm">
+                            {relay.blocksWon > 0 ? relay.blocksWon : (
+                              <span className="text-muted-foreground">0</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm">
+                            {relay.totalValueEth > 0
+                              ? `${relay.totalValueEth.toFixed(4)} ETH`
+                              : <span className="text-muted-foreground">—</span>}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm">
+                            {relay.avgBidEth > 0
+                              ? relay.avgBidEth.toFixed(6)
+                              : <span className="text-muted-foreground">—</span>}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {relay.latencyMs > 0 ? (
+                              <span
+                                className={`font-mono text-sm ${
+                                  relay.latencyMs > 500
+                                    ? "text-red-400"
+                                    : relay.latencyMs > 200
+                                    ? "text-amber-400"
+                                    : "text-emerald-400"
+                                }`}
+                              >
+                                {relay.latencyMs}ms
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground text-sm">timeout</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="pr-6 text-right font-mono text-sm text-muted-foreground">
+                            {relay.latestBlock
+                              ? `#${relay.latestBlock.toLocaleString()}`
+                              : "—"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Arbitrum Relays */}
+            <Card className="border-border/50 bg-card/60">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base font-semibold">Arbitrum One Relays</span>
+                    <Badge className="bg-purple-500/15 text-purple-400 border-purple-500/30 text-xs">
+                      Chain 42161
+                    </Badge>
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {data.arbitrumRelays.length} relays · status live-checked
+                  </span>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                {data.arbitrumRelays.length === 0 ? (
+                  <div className="py-8 text-center text-muted-foreground text-sm">
+                    No Arbitrum relays configured
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-border/50 hover:bg-transparent">
+                        <TableHead className="pl-6 text-xs font-medium text-muted-foreground">Relay</TableHead>
+                        <TableHead className="text-xs font-medium text-muted-foreground">Status</TableHead>
+                        <TableHead className="text-xs font-medium text-muted-foreground text-right">
+                          Blocks in Feed
+                        </TableHead>
+                        <TableHead className="text-xs font-medium text-muted-foreground text-right">
+                          Total Value
+                        </TableHead>
+                        <TableHead className="text-xs font-medium text-muted-foreground text-right">
+                          Avg Bid
+                        </TableHead>
+                        <TableHead className="text-xs font-medium text-muted-foreground text-right">
+                          Latency
+                        </TableHead>
+                        <TableHead className="pr-6 text-xs font-medium text-muted-foreground text-right">
+                          Latest Block
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {data.arbitrumRelays.map((relay) => (
+                        <TableRow
+                          key={relay.slug}
+                          className="border-border/40 hover:bg-muted/30 transition-colors"
+                        >
+                          <TableCell className="pl-6 py-4">
+                            <div>
+                              <div className="font-medium text-sm">{relay.name}</div>
+                              <div className="text-xs text-muted-foreground font-mono mt-0.5 truncate max-w-55">
+                                {relay.url}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <StatusBadge status={relay.status} />
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm">
+                            {relay.blocksWon > 0 ? relay.blocksWon : (
+                              <span className="text-muted-foreground">0</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm">
+                            {relay.totalValueEth > 0
+                              ? `${relay.totalValueEth.toFixed(4)} ETH`
+                              : <span className="text-muted-foreground">—</span>}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm">
+                            {relay.avgBidEth > 0
+                              ? relay.avgBidEth.toFixed(6)
+                              : <span className="text-muted-foreground">—</span>}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {relay.latencyMs > 0 ? (
+                              <span
+                                className={`font-mono text-sm ${
+                                  relay.latencyMs > 500
+                                    ? "text-red-400"
+                                    : relay.latencyMs > 200
+                                    ? "text-amber-400"
+                                    : "text-emerald-400"
+                                }`}
+                              >
+                                {relay.latencyMs}ms
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground text-sm">timeout</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="pr-6 text-right font-mono text-sm text-muted-foreground">
+                            {relay.latestBlock
+                              ? `#${relay.latestBlock.toLocaleString()}`
+                              : "—"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -415,6 +533,7 @@ export default function Dashboard() {
                     <TableHeader>
                       <TableRow className="border-border/50 hover:bg-transparent">
                         <TableHead className="pl-6 text-xs font-medium text-muted-foreground">Block</TableHead>
+                        <TableHead className="text-xs font-medium text-muted-foreground">Chain</TableHead>
                         <TableHead className="text-xs font-medium text-muted-foreground">Relay</TableHead>
                         <TableHead className="text-xs font-medium text-muted-foreground">Builder</TableHead>
                         <TableHead className="text-xs font-medium text-muted-foreground text-right">Value</TableHead>
@@ -433,6 +552,15 @@ export default function Dashboard() {
                             <span className="font-mono text-sm text-primary font-medium">
                               #{parseInt(block.block_number, 10).toLocaleString()}
                             </span>
+                          </TableCell>
+                          <TableCell>
+                            <Badge className={`text-xs font-medium ${
+                              block.chain === "ethereum"
+                                ? "bg-blue-500/15 text-blue-400 border-blue-500/30"
+                                : "bg-purple-500/15 text-purple-400 border-purple-500/30"
+                            }`}>
+                              {block.chain === "ethereum" ? "Ethereum" : "Arbitrum"}
+                            </Badge>
                           </TableCell>
                           <TableCell>
                             <span className="text-sm font-medium">{block.relayName}</span>
