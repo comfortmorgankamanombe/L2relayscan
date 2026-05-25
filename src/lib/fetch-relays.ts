@@ -68,7 +68,7 @@ async function probeStatus(url: string, chain: ChainType): Promise<{ status: Rel
   }
 }
 
-async function fetchPayloads(url: string, chain: ChainType): Promise<RelayPayload[]> {
+async function fetchPayloads(url: string): Promise<RelayPayload[]> {
   try {
     const res = await fetch(
       `${url}/relay/v1/data/bidtraces/proposer_payload_delivered?limit=50`,
@@ -77,16 +77,7 @@ async function fetchPayloads(url: string, chain: ChainType): Promise<RelayPayloa
     if (!res.ok) return []
     const data: unknown = await res.json()
     if (!Array.isArray(data)) return []
-    
-    const payloads = data as RelayPayload[]
-    
-    // For Arbitrum, filter by chain_id 42161
-    if (chain === "arbitrum") {
-      return payloads.filter(p => p.chain_id === "42161")
-    }
-    
-    // For Ethereum, include only if chain_id is not Arbitrum (or chain_id not specified)
-    return payloads.filter(p => !p.chain_id || p.chain_id !== "42161")
+    return data as RelayPayload[]
   } catch {
     return []
   }
@@ -132,7 +123,7 @@ export async function fetchDashboardData(): Promise<DashboardData> {
       RELAYS.map(async (relay) => {
         const [probe, payloads] = await Promise.all([
           probeStatus(relay.url, relay.chain),
-          fetchPayloads(relay.url, relay.chain),
+          fetchPayloads(relay.url),
         ])
 
         const totalValueEth = payloads.reduce((sum, p) => sum + weiToEth(p.value), 0)
