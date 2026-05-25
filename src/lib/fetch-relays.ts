@@ -82,11 +82,11 @@ async function fetchPayloads(url: string, chain: ChainType): Promise<RelayPayloa
     
     // For Arbitrum, filter by chain_id 42161
     if (chain === "arbitrum") {
-      return payloads.filter(p => p.chain_id === "42161" || p.chain_id === 42161)
+      return payloads.filter(p => p.chain_id === "42161")
     }
     
     // For Ethereum, include only if chain_id is not Arbitrum (or chain_id not specified)
-    return payloads.filter(p => !p.chain_id || (p.chain_id !== "42161" && p.chain_id !== 42161))
+    return payloads.filter(p => !p.chain_id || p.chain_id !== "42161")
   } catch {
     return []
   }

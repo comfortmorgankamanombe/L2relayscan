@@ -25,7 +25,7 @@ export const ARBITRUM_RELAYS = [
   },
 ] as const
 
-export const RELAYS = ARBITRUM_RELAYS as const
+export const RELAYS = ARBITRUM_RELAYS
 
 export type RelaySlug = (typeof RELAYS)[number]["slug"]
 export type ChainType = "ethereum" | "arbitrum"
