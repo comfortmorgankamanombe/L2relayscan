@@ -56,6 +56,12 @@ export const ARBITRUM_RELAYS = [
     url: "https://aestus.live",
     chain: "arbitrum",
   },
+  {
+    name: "Pulselink",
+    slug: "pulselink-arb",
+    url: "https://pulselinkrelay.org",
+    chain: "arbitrum",
+  },
 ] as const
 
 export const RELAYS = [...ETHEREUM_RELAYS, ...ARBITRUM_RELAYS] as const

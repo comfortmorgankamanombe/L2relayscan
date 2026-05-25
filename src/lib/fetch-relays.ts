@@ -13,6 +13,7 @@ export interface RelayPayload {
   value: string
   num_tx: string
   block_number: string
+  chain_id?: string
 }
 
 export interface RelayResult {
@@ -75,7 +76,17 @@ async function fetchPayloads(url: string, chain: ChainType): Promise<RelayPayloa
     )
     if (!res.ok) return []
     const data: unknown = await res.json()
-    return Array.isArray(data) ? (data as RelayPayload[]) : []
+    if (!Array.isArray(data)) return []
+    
+    const payloads = data as RelayPayload[]
+    
+    // For Arbitrum, filter by chain_id 42161
+    if (chain === "arbitrum") {
+      return payloads.filter(p => p.chain_id === "42161" || p.chain_id === 42161)
+    }
+    
+    // For Ethereum, include only if chain_id is not Arbitrum (or chain_id not specified)
+    return payloads.filter(p => !p.chain_id || (p.chain_id !== "42161" && p.chain_id !== 42161))
   } catch {
     return []
   }
