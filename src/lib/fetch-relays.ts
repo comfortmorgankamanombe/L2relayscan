@@ -36,13 +36,13 @@ export interface RecentBlock extends RelayPayload {
 }
 
 export interface DashboardData {
-  ethereumRelays: RelayResult[]
-  arbitrumRelays: RelayResult[]
+  relays: RelayResult[]
   recentBlocks: RecentBlock[]
   totalUniqueBlocks: number
   totalValueEth: number
   activeRelays: number
   avgBidEth: number
+  currentBlockNumber: number | null
   fetchedAt: string
 }
 
@@ -92,41 +92,78 @@ async function fetchPayloads(url: string, chain: ChainType): Promise<RelayPayloa
   }
 }
 
-export async function fetchDashboardData(): Promise<DashboardData> {
-  const relayResults = await Promise.all(
-    RELAYS.map(async (relay) => {
-      const [probe, payloads] = await Promise.all([
-        probeStatus(relay.url, relay.chain),
-        fetchPayloads(relay.url, relay.chain),
-      ])
-
-      const totalValueEth = payloads.reduce((sum, p) => sum + weiToEth(p.value), 0)
-      const blocksWon = payloads.length
-      const avgBidEth = blocksWon > 0 ? totalValueEth / blocksWon : 0
-      const latestBlock =
-        blocksWon > 0
-          ? Math.max(...payloads.map((p) => parseInt(p.block_number, 10)))
-          : null
-
-      return {
-        relay,
-        probe,
-        payloads,
-        result: {
-          name: relay.name,
-          slug: relay.slug,
-          url: relay.url,
-          chain: relay.chain,
-          status: probe.status,
-          latencyMs: probe.latencyMs,
-          blocksWon,
-          totalValueEth,
-          avgBidEth,
-          latestBlock,
-        } satisfies RelayResult,
+async function fetchCurrentArbitrumBlockNumber(): Promise<number | null> {
+  try {
+    const res = await fetch(
+      "https://arb-mainnet.g.alchemy.com/v2/aE6JU86iKh_qQRQVfUbmN",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "eth_blockNumber",
+          params: [],
+          id: 1,
+        }),
+        cache: "no-store",
+        signal: AbortSignal.timeout(5000),
       }
-    })
-  )
+    )
+    if (!res.ok) return null
+    const data: unknown = await res.json()
+    if (
+      data &&
+      typeof data === "object" &&
+      "result" in data &&
+      typeof (data as { result: unknown }).result === "string"
+    ) {
+      const blockHex = (data as { result: string }).result
+      return parseInt(blockHex, 16)
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+export async function fetchDashboardData(): Promise<DashboardData> {
+  const [relayResults, currentBlockNumber] = await Promise.all([
+    Promise.all(
+      RELAYS.map(async (relay) => {
+        const [probe, payloads] = await Promise.all([
+          probeStatus(relay.url, relay.chain),
+          fetchPayloads(relay.url, relay.chain),
+        ])
+
+        const totalValueEth = payloads.reduce((sum, p) => sum + weiToEth(p.value), 0)
+        const blocksWon = payloads.length
+        const avgBidEth = blocksWon > 0 ? totalValueEth / blocksWon : 0
+        const latestBlock =
+          blocksWon > 0
+            ? Math.max(...payloads.map((p) => parseInt(p.block_number, 10)))
+            : null
+
+        return {
+          relay,
+          probe,
+          payloads,
+          result: {
+            name: relay.name,
+            slug: relay.slug,
+            url: relay.url,
+            chain: relay.chain,
+            status: probe.status,
+            latencyMs: probe.latencyMs,
+            blocksWon,
+            totalValueEth,
+            avgBidEth,
+            latestBlock,
+          } satisfies RelayResult,
+        }
+      })
+    ),
+    fetchCurrentArbitrumBlockNumber(),
+  ])
 
   // Deduplicate blocks across relays by block_hash, prefer highest-value entry
   const blockMap = new Map<string, RecentBlock>()
@@ -148,22 +185,20 @@ export async function fetchDashboardData(): Promise<DashboardData> {
   const totalValueEth = recentBlocks.reduce((sum, b) => sum + b.valueEth, 0)
   const avgBidEth = recentBlocks.length > 0 ? totalValueEth / recentBlocks.length : 0
 
-  const allResults = relayResults
+  const relays = relayResults
     .map((r) => r.result)
     .sort((a, b) => b.blocksWon - a.blocksWon)
 
-  const ethereumRelays = allResults.filter((r) => r.chain === "ethereum")
-  const arbitrumRelays = allResults.filter((r) => r.chain === "arbitrum")
-  const activeRelays = allResults.filter((r) => r.status === "online").length
+  const activeRelays = relays.filter((r) => r.status === "online").length
 
   return {
-    ethereumRelays,
-    arbitrumRelays,
+    relays,
     recentBlocks,
     totalUniqueBlocks,
     totalValueEth,
     activeRelays,
     avgBidEth,
+    currentBlockNumber,
     fetchedAt: new Date().toISOString(),
   }
 }
