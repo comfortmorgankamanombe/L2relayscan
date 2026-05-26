@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
+import { useRouter } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
@@ -110,13 +111,14 @@ const defaultData: DashboardData = {
 }
 
 export default function Dashboard() {
+  const router = useRouter()
   const [data, setData] = useState<DashboardData>(defaultData)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async (silent = false) => {
     try {
-      setLoading(true)
+      if (!silent) setLoading(true)
       setError(null)
       const response = await fetch("/api/relay-stats")
       if (!response.ok) throw new Error("Failed to fetch relay stats")
@@ -125,13 +127,21 @@ export default function Dashboard() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error occurred")
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
     fetchData()
-  }, [])
+  }, [fetchData])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      router.refresh()
+      fetchData(true)
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [fetchData, router])
 
   const latestBlock = data.recentBlocks[0]?.block_number
     ? parseInt(data.recentBlocks[0].block_number, 10)
@@ -216,7 +226,7 @@ export default function Dashboard() {
                   <p className="text-xs text-red-400/70 mt-1">{error}</p>
                 </div>
                 <button
-                  onClick={fetchData}
+                  onClick={() => fetchData()}
                   className="text-xs font-medium text-red-400 hover:text-red-300 px-3 py-1 rounded hover:bg-red-500/20 transition-colors"
                 >
                   Retry
