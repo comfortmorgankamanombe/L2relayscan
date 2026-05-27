@@ -34,6 +34,231 @@ import type {
 } from "@/lib/fetch-relays"
 import type { ChainType } from "@/lib/relay-config"
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type RelayTransition = "RECOVERING" | "IMPROVING" | "UNDER LOAD" | "DETERIORATING" | "STABLE"
+
+interface CompStats {
+  fastestSlug: string | null
+  biggestGainerSlug: string | null
+  biggestLoserSlug: string | null
+  mostStableSlug: string | null
+}
+
+// ── History-driven computations ───────────────────────────────────────────────
+
+function computeRelayTransitions(
+  relays: RelayResult[],
+  history: DashboardData[],
+): Map<string, RelayTransition> {
+  const result = new Map<string, RelayTransition>()
+  if (history.length === 0) return result
+  const prev = history[history.length - 1]
+  const prevMap = new Map(prev.relays.map((r) => [r.slug, r]))
+  for (const relay of relays) {
+    const p = prevMap.get(relay.slug)
+    if (!p) continue
+    if (p.status === "offline" && relay.status === "online") {
+      result.set(relay.slug, "RECOVERING")
+    } else if (relay.status !== "online") {
+      // offline relay — no transition label
+    } else if (relay.score.overall - p.score.overall >= 8) {
+      result.set(relay.slug, "IMPROVING")
+    } else if (relay.score.overall - p.score.overall <= -8) {
+      result.set(relay.slug, "DETERIORATING")
+    } else if (relay.latencyMs - p.latencyMs >= 80 && relay.latencyMs > 250) {
+      result.set(relay.slug, "UNDER LOAD")
+    } else {
+      result.set(relay.slug, "STABLE")
+    }
+  }
+  return result
+}
+
+function computeDeltaEvents(
+  current: DashboardData,
+  history: DashboardData[],
+): IntelligenceEvent[] {
+  if (history.length === 0) return []
+  const prev = history[history.length - 1]
+  const prevMap = new Map(prev.relays.map((r) => [r.slug, r]))
+  const events: IntelligenceEvent[] = []
+  const now = new Date().toISOString()
+  const ts = Date.now()
+  for (const relay of current.relays) {
+    const p = prevMap.get(relay.slug)
+    if (!p) continue
+    if (p.status === "offline" && relay.status === "online") {
+      events.push({
+        id: `${relay.slug}-recovered-${ts}`,
+        type: "recovered",
+        severity: "info",
+        message: `${relay.name} back online — execution capacity restored`,
+        relay: relay.name,
+        chain: relay.chain,
+        timestamp: now,
+      })
+      continue
+    }
+    if (relay.status !== "online") continue
+    const scoreDelta = relay.score.overall - p.score.overall
+    if (scoreDelta <= -10) {
+      events.push({
+        id: `${relay.slug}-drop-${ts}`,
+        type: "rank_change",
+        severity: "warning",
+        message: `${relay.name} dropped ${Math.abs(scoreDelta)}pts — execution quality declining`,
+        relay: relay.name,
+        chain: relay.chain,
+        timestamp: now,
+      })
+    } else if (scoreDelta >= 10) {
+      events.push({
+        id: `${relay.slug}-gain-${ts}`,
+        type: "rank_change",
+        severity: "info",
+        message: `${relay.name} gained ${scoreDelta}pts — performance recovering`,
+        relay: relay.name,
+        chain: relay.chain,
+        timestamp: now,
+      })
+    }
+    const latDelta = relay.latencyMs - p.latencyMs
+    if (latDelta >= 80 && relay.latencyMs > 200) {
+      events.push({
+        id: `${relay.slug}-lat-${ts}`,
+        type: "latency_trend",
+        severity: "warning",
+        message: `${relay.name} latency +${latDelta}ms → ${relay.latencyMs}ms — monitor MEV inclusion`,
+        relay: relay.name,
+        chain: relay.chain,
+        timestamp: now,
+      })
+    }
+  }
+  return events
+}
+
+function computeSimEvents(
+  relays: RelayResult[],
+  history: DashboardData[],
+  existingAlertCount: number,
+): IntelligenceEvent[] {
+  if (existingAlertCount >= 3) return []
+  const online = relays.filter((r) => r.status === "online")
+  if (online.length === 0) return []
+  const events: IntelligenceEvent[] = []
+  const now = new Date().toISOString()
+  const bucket = Math.floor(Date.now() / 60000)
+
+  if (online.length > 1) {
+    const fastest = online.reduce((a, b) => (a.latencyMs < b.latencyMs ? a : b))
+    const avgLat = Math.round(online.reduce((s, r) => s + r.latencyMs, 0) / online.length)
+    if (fastest.latencyMs < avgLat * 0.65) {
+      events.push({
+        id: `sim-fastest-${bucket}`,
+        type: "simulation",
+        severity: "info",
+        message: `${fastest.name} leads on latency at ${fastest.latencyMs}ms — ${avgLat - fastest.latencyMs}ms below field average`,
+        relay: fastest.name,
+        chain: fastest.chain,
+        timestamp: now,
+      })
+    }
+  }
+
+  if (online.length > 1) {
+    const scores = online.map((r) => r.score.overall)
+    const maxScore = Math.max(...scores)
+    const minScore = Math.min(...scores)
+    if (maxScore - minScore > 15) {
+      const leader = online.find((r) => r.score.overall === maxScore)!
+      events.push({
+        id: `sim-spread-${bucket}`,
+        type: "simulation",
+        severity: "info",
+        message: `Quality gap: ${leader.name} at ${maxScore} leads by ${maxScore - minScore}pts — competitive pressure on lower-ranked endpoints`,
+        relay: leader.name,
+        chain: leader.chain,
+        timestamp: now,
+      })
+    }
+  }
+
+  if (online.length >= 3) {
+    const scores = online.map((r) => r.score.overall)
+    const spread = Math.max(...scores) - Math.min(...scores)
+    if (spread <= 5) {
+      events.push({
+        id: `sim-stable-${bucket}`,
+        type: "stability",
+        severity: "info",
+        message: `Network stable — all ${online.length} active endpoints within ${spread}pt of each other`,
+        timestamp: now,
+      })
+    }
+  }
+
+  if (history.length >= 3) {
+    const older = history[Math.max(0, history.length - 3)]
+    const olderOnline = older.relays.filter((r) => r.status === "online")
+    if (olderOnline.length > 0) {
+      const olderAvg = olderOnline.reduce((s, r) => s + r.score.overall, 0) / olderOnline.length
+      const currentAvg = online.reduce((s, r) => s + r.score.overall, 0) / online.length
+      if (currentAvg - olderAvg >= 5) {
+        events.push({
+          id: `sim-trend-${bucket}`,
+          type: "latency_trend",
+          severity: "info",
+          message: `Network trending up — avg score +${Math.round(currentAvg - olderAvg)}pts over last ${history.length * 5}s`,
+          timestamp: now,
+        })
+      }
+    }
+  }
+
+  return events.slice(0, 2)
+}
+
+function computeCompStats(relays: RelayResult[], history: DashboardData[]): CompStats {
+  const online = relays.filter((r) => r.status === "online")
+  const fastestSlug =
+    online.length > 0
+      ? online.reduce((a, b) => (a.latencyMs < b.latencyMs ? a : b)).slug
+      : null
+  if (history.length === 0) {
+    return { fastestSlug, biggestGainerSlug: null, biggestLoserSlug: null, mostStableSlug: null }
+  }
+  const prev = history[history.length - 1]
+  const prevMap = new Map(prev.relays.map((r) => [r.slug, r]))
+  let maxGain = 5
+  let maxLoss = -5
+  let biggestGainerSlug: string | null = null
+  let biggestLoserSlug: string | null = null
+  for (const relay of online) {
+    const p = prevMap.get(relay.slug)
+    if (!p) continue
+    const delta = relay.score.overall - p.score.overall
+    if (delta > maxGain) { maxGain = delta; biggestGainerSlug = relay.slug }
+    if (delta < maxLoss) { maxLoss = delta; biggestLoserSlug = relay.slug }
+  }
+  let mostStableSlug: string | null = null
+  if (history.length >= 3) {
+    let minVariance = Infinity
+    for (const relay of online) {
+      const scores = history
+        .slice(-3)
+        .map((h) => h.relays.find((r) => r.slug === relay.slug)?.score.overall ?? null)
+        .filter((s): s is number => s !== null)
+      if (scores.length < 2) continue
+      const avg = scores.reduce((a, b) => a + b, 0) / scores.length
+      const variance = scores.reduce((s, v) => s + Math.abs(v - avg), 0)
+      if (variance < minVariance) { minVariance = variance; mostStableSlug = relay.slug }
+    }
+  }
+  return { fastestSlug, biggestGainerSlug, biggestLoserSlug, mostStableSlug }
+}
+
 // ── Primitive badges ──────────────────────────────────────────────────────────
 
 function StatusDot({ status }: { status: RelayStatus }) {
@@ -108,7 +333,7 @@ function LatencyCell({ ms, status }: { ms: number; status: RelayStatus }) {
   return <span className={`font-mono text-xs tabular-nums ${cls}`}>{ms}ms</span>
 }
 
-// ── Last updated badge (isolated 1s re-render) ────────────────────────────────
+// ── Last updated badge ────────────────────────────────────────────────────────
 
 function LastUpdatedBadge({ fetchedAt, isLive }: { fetchedAt: string; isLive: boolean }) {
   const [elapsed, setElapsed] = useState(0)
@@ -120,7 +345,6 @@ function LastUpdatedBadge({ fetchedAt, isLive }: { fetchedAt: string; isLive: bo
     const id = setInterval(tick, 1000)
     return () => clearInterval(id)
   }, [fetchedAt, isLive])
-
   if (!isLive) return <span className="text-[10px] text-muted-foreground/50">initializing…</span>
   if (elapsed <= 1) return <span className="text-[10px] text-emerald-400">just now</span>
   return <span className="text-[10px] text-muted-foreground">{elapsed}s ago</span>
@@ -135,6 +359,11 @@ const EVENT_ICON: Record<EventType, React.ReactNode> = {
   high_value:      <TrendingUp className="h-3 w-3 text-blue-400 shrink-0" />,
   efficiency_drop: <Activity className="h-3 w-3 text-amber-400 shrink-0" />,
   nominal:         <CheckCircle2 className="h-3 w-3 text-emerald-400 shrink-0" />,
+  recovered:       <CheckCircle2 className="h-3 w-3 text-emerald-400 shrink-0" />,
+  rank_change:     <TrendingUp className="h-3 w-3 text-amber-400 shrink-0" />,
+  latency_trend:   <Timer className="h-3 w-3 text-amber-400 shrink-0" />,
+  stability:       <CheckCircle2 className="h-3 w-3 text-sky-400 shrink-0" />,
+  simulation:      <CircleDot className="h-3 w-3 text-muted-foreground/40 shrink-0" />,
 }
 const EVENT_BORDER: Record<string, string> = {
   critical: "border-l-red-500/70",
@@ -146,9 +375,9 @@ const EVENT_TEXT: Record<string, string> = {
   warning:  "text-amber-300/90",
   info:     "text-foreground/75",
 }
-function FeedItem({ event }: { event: IntelligenceEvent }) {
+function FeedItem({ event, isNew }: { event: IntelligenceEvent; isNew?: boolean }) {
   return (
-    <div className={`border-l-2 pl-3 py-2 ${EVENT_BORDER[event.severity]}`}>
+    <div className={`border-l-2 pl-3 py-2 ${EVENT_BORDER[event.severity]}${isNew ? " animate-feed-in" : ""}`}>
       <div className="flex items-start gap-2">
         {EVENT_ICON[event.type]}
         <p className={`text-[11px] leading-snug ${EVENT_TEXT[event.severity]}`}>{event.message}</p>
@@ -157,6 +386,31 @@ function FeedItem({ event }: { event: IntelligenceEvent }) {
         <p className="text-[10px] text-muted-foreground/60 mt-0.5 pl-5">{event.relay}</p>
       )}
     </div>
+  )
+}
+
+// ── Transition label ──────────────────────────────────────────────────────────
+
+const TRANSITION_CLS: Record<RelayTransition, string> = {
+  RECOVERING:    "text-emerald-400 bg-emerald-400/10 border-emerald-400/25",
+  IMPROVING:     "text-sky-400 bg-sky-400/10 border-sky-400/25",
+  "UNDER LOAD":  "text-amber-400 bg-amber-400/10 border-amber-400/25",
+  DETERIORATING: "text-orange-400 bg-orange-400/10 border-orange-400/25",
+  STABLE:        "",
+}
+const TRANSITION_SUFFIX: Record<RelayTransition, string> = {
+  RECOVERING:    "↑",
+  IMPROVING:     "↑",
+  "UNDER LOAD":  "↓",
+  DETERIORATING: "↓",
+  STABLE:        "",
+}
+function TransitionLabel({ t }: { t: RelayTransition }) {
+  if (t === "STABLE") return null
+  return (
+    <span className={`inline-flex px-1.5 py-0.5 rounded-sm border text-[9px] font-bold tracking-wider ${TRANSITION_CLS[t]}`}>
+      {t}{TRANSITION_SUFFIX[t]}
+    </span>
   )
 }
 
@@ -215,7 +469,6 @@ function TH({ children, right, hidden }: { children: React.ReactNode; right?: bo
 function RelayDetailPane({ relay }: { relay: RelayResult }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 px-5 py-4 bg-card/40 border-b border-border/20">
-      {/* Score breakdown */}
       <div>
         <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-3">Score Breakdown</p>
         {([
@@ -234,7 +487,6 @@ function RelayDetailPane({ relay }: { relay: RelayResult }) {
         ))}
       </div>
 
-      {/* Economic impact */}
       <div>
         <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-3">Economic Impact</p>
         <div className="space-y-2">
@@ -258,15 +510,14 @@ function RelayDetailPane({ relay }: { relay: RelayResult }) {
         </div>
       </div>
 
-      {/* Endpoint info */}
       <div>
         <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-3">Endpoint Info</p>
         <div className="space-y-2">
           {([
-            { k: "Type",           v: relay.endpointType === "mev-relay" ? "MEV Relay" : "Execution Endpoint" },
-            { k: "Network",        v: relay.chain.charAt(0).toUpperCase() + relay.chain.slice(1) },
-            { k: "Blocks Tracked", v: String(relay.blocksWon) },
-            { k: "Composite Score",v: `${relay.score.overall}/100` },
+            { k: "Type",            v: relay.endpointType === "mev-relay" ? "MEV Relay" : "Execution Endpoint" },
+            { k: "Network",         v: relay.chain.charAt(0).toUpperCase() + relay.chain.slice(1) },
+            { k: "Blocks Tracked",  v: String(relay.blocksWon) },
+            { k: "Composite Score", v: `${relay.score.overall}/100` },
             ...(relay.latestBlock ? [{ k: "Latest Block", v: `#${relay.latestBlock.toLocaleString()}` }] : []),
           ] as const).map(({ k, v }) => (
             <div key={k} className="flex items-center justify-between">
@@ -283,9 +534,9 @@ function RelayDetailPane({ relay }: { relay: RelayResult }) {
 // ── Relay row ─────────────────────────────────────────────────────────────────
 
 function RelayRow({
-  relay, expanded, onToggle,
+  relay, expanded, onToggle, transition,
 }: {
-  relay: RelayResult; expanded: boolean; onToggle: () => void
+  relay: RelayResult; expanded: boolean; onToggle: () => void; transition?: RelayTransition
 }) {
   return (
     <tr
@@ -309,11 +560,12 @@ function RelayRow({
         </div>
       </td>
       <td className="px-3 py-2.5"><ChainBadge chain={relay.chain} /></td>
-      <td className="px-3 py-2.5 w-36">
+      <td className="px-3 py-2.5 w-40">
         <ScoreBar score={relay.score.overall} tier={relay.score.tier} />
-        <div className="flex items-center gap-2 mt-1">
+        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
           <span className="font-mono text-xs tabular-nums">{relay.score.overall}</span>
           <TierBadge tier={relay.score.tier} />
+          {transition && transition !== "STABLE" && <TransitionLabel t={transition} />}
         </div>
       </td>
       <td className="px-3 py-2.5 hidden sm:table-cell">
@@ -413,7 +665,6 @@ function BestRelayCard({ best, isLive }: { best: BestRelay | undefined; isLive: 
         </div>
         <ChainBadge chain={relay.chain} />
       </div>
-
       <div className="flex items-start justify-between gap-2 mb-3">
         <div>
           <div className="text-3xl font-bold font-mono tabular-nums text-emerald-400 leading-none">
@@ -429,7 +680,6 @@ function BestRelayCard({ best, isLive }: { best: BestRelay | undefined; isLive: 
           <EfficBadge label={relay.economicImpact.label} />
         </div>
       </div>
-
       <div className="space-y-1.5 mb-3">
         {reasons.map((r) => (
           <div key={r} className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -437,7 +687,6 @@ function BestRelayCard({ best, isLive }: { best: BestRelay | undefined; isLive: 
           </div>
         ))}
       </div>
-
       <div className="border-t border-border/25 pt-3 space-y-1.5">
         <div className="flex items-center justify-between text-xs">
           <span className="text-muted-foreground">Confidence</span>
@@ -498,12 +747,16 @@ const SECTION_TITLE: Record<ActiveChain, string> = {
 export default function Dashboard() {
   const router = useRouter()
   const initialLoad = useRef(true)
+  const dataRef = useRef<DashboardData>(defaultData)
+  const historyRef = useRef<DashboardData[]>([])
+  const feedIdsPrevRef = useRef<Set<string>>(new Set())
 
   const [data, setData] = useState<DashboardData>(defaultData)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activeChain, setActiveChain] = useState<ActiveChain>("all")
   const [expandedRelays, setExpandedRelays] = useState<Set<string>>(new Set())
+  const [newFeedIds, setNewFeedIds] = useState<Set<string>>(new Set())
 
   const fetchData = useCallback(async (silent = false) => {
     try {
@@ -512,6 +765,12 @@ export default function Dashboard() {
       const res = await fetch("/api/relay-stats")
       if (!res.ok) throw new Error(`Server error ${res.status}`)
       const next: DashboardData = await res.json()
+      // Archive current snapshot before replacing
+      if (dataRef.current !== defaultData) {
+        historyRef.current.push(dataRef.current)
+        if (historyRef.current.length > 60) historyRef.current.shift()
+      }
+      dataRef.current = next
       setData(next)
       initialLoad.current = false
     } catch (err) {
@@ -536,7 +795,7 @@ export default function Dashboard() {
     })
   }, [])
 
-  // Memoised derived data
+  // Derived data
   const filteredRelays = useMemo(
     () => activeChain === "all" ? data.relays : data.relays.filter((r) => r.chain === activeChain),
     [data.relays, activeChain]
@@ -558,13 +817,83 @@ export default function Dashboard() {
       : data.bestRelays[activeChain],
     [data.bestRelays, activeChain]
   )
-
   const criticalCount = useMemo(
     () => data.intelligenceFeed.filter((e) => e.severity === "critical").length,
     [data.intelligenceFeed]
   )
-  const isLive = !loading
 
+  // History-driven memos
+  const deltaEvents = useMemo(
+    () => computeDeltaEvents(data, historyRef.current),
+    [data]
+  )
+  const relayTransitions = useMemo(
+    () => computeRelayTransitions(filteredRelays, historyRef.current),
+    [filteredRelays]
+  )
+  const simEvents = useMemo(() => {
+    const alertCount =
+      deltaEvents.filter((e) => e.severity !== "info").length +
+      filteredFeed.filter((e) => e.severity !== "info").length
+    return computeSimEvents(filteredRelays, historyRef.current, alertCount)
+  }, [filteredRelays, deltaEvents, filteredFeed])
+
+  const compStats = useMemo(
+    () => computeCompStats(filteredRelays, historyRef.current),
+    [filteredRelays]
+  )
+
+  const mergedFeed = useMemo((): IntelligenceEvent[] => {
+    const severityOrder: Record<string, number> = { critical: 0, warning: 1, info: 2 }
+    const chainDelta =
+      activeChain === "all"
+        ? deltaEvents
+        : deltaEvents.filter((e) => !e.chain || e.chain === activeChain)
+    const all = [...chainDelta, ...filteredFeed, ...simEvents]
+    const seen = new Set<string>()
+    return all
+      .filter((e) => (seen.has(e.id) ? false : (seen.add(e.id), true)))
+      .sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity])
+      .slice(0, 20)
+  }, [deltaEvents, filteredFeed, simEvents, activeChain])
+
+  const compStripItems = useMemo(() => {
+    const items: Array<{ key: string; label: string; cls: string }> = []
+    const relayMap = new Map(data.relays.map((r) => [r.slug, r]))
+    if (compStats.fastestSlug) {
+      const r = relayMap.get(compStats.fastestSlug)
+      if (r) items.push({ key: "fast", label: `⚡ ${r.name} fastest (${r.latencyMs}ms)`, cls: "text-emerald-400" })
+    }
+    if (compStats.biggestGainerSlug) {
+      const r = relayMap.get(compStats.biggestGainerSlug)
+      if (r) items.push({ key: "gain", label: `▲ ${r.name} improving`, cls: "text-sky-400" })
+    }
+    if (compStats.biggestLoserSlug) {
+      const r = relayMap.get(compStats.biggestLoserSlug)
+      if (r) items.push({ key: "loss", label: `▼ ${r.name} under pressure`, cls: "text-amber-400" })
+    }
+    if (compStats.mostStableSlug) {
+      const r = relayMap.get(compStats.mostStableSlug)
+      if (r) items.push({ key: "stable", label: `◆ ${r.name} most stable`, cls: "text-primary/80" })
+    }
+    return items
+  }, [compStats, data.relays])
+
+  // Feed animation: highlight newly arrived events
+  useEffect(() => {
+    const freshIds = new Set<string>()
+    for (const e of mergedFeed) {
+      if (!feedIdsPrevRef.current.has(e.id)) freshIds.add(e.id)
+    }
+    feedIdsPrevRef.current = new Set(mergedFeed.map((e) => e.id))
+    if (freshIds.size > 0) {
+      setNewFeedIds(freshIds)
+      const timer = setTimeout(() => setNewFeedIds(new Set()), 1500)
+      return () => clearTimeout(timer)
+    }
+  }, [mergedFeed])
+
+  const isLive = !loading
   const sectionTitle = SECTION_TITLE[activeChain]
 
   return (
@@ -585,7 +914,6 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Chain tabs */}
           <div className="flex items-center gap-0.5 bg-muted/20 rounded border border-border/40 p-0.5">
             {CHAIN_TABS.map((c) => (
               <button
@@ -602,7 +930,6 @@ export default function Dashboard() {
             ))}
           </div>
 
-          {/* Right status */}
           <div className="flex items-center gap-3 shrink-0">
             {criticalCount > 0 && (
               <div className="hidden sm:flex items-center gap-1 text-[10px] font-bold text-red-400 animate-pulse">
@@ -715,6 +1042,7 @@ export default function Dashboard() {
                             relay={relay}
                             expanded={expandedRelays.has(relay.slug)}
                             onToggle={() => toggleRelay(relay.slug)}
+                            transition={relayTransitions.get(relay.slug)}
                           />
                           {expandedRelays.has(relay.slug) && (
                             <tr>
@@ -729,6 +1057,16 @@ export default function Dashboard() {
                   </tbody>
                 </table>
               </div>
+
+              {/* Competitive strip */}
+              {!loading && compStripItems.length > 0 && (
+                <div className="flex flex-wrap items-center gap-3 px-4 py-2 border-t border-border/20 bg-card/20">
+                  <span className="text-[10px] text-muted-foreground/40 uppercase tracking-wider shrink-0">Live Intel</span>
+                  {compStripItems.map((item) => (
+                    <span key={item.key} className={`text-[10px] font-bold ${item.cls}`}>{item.label}</span>
+                  ))}
+                </div>
+              )}
 
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 border-t border-border/20 bg-card/20">
                 <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider">
@@ -753,15 +1091,15 @@ export default function Dashboard() {
             <Panel
               icon={Globe}
               title="Intelligence Feed"
-              right={`${filteredFeed.length} events`}
+              right={`${mergedFeed.length} events`}
             >
               <div className="divide-y divide-border/15 max-h-80 overflow-y-auto">
-                {filteredFeed.length === 0 ? (
+                {mergedFeed.length === 0 ? (
                   <p className="px-4 py-8 text-xs text-muted-foreground text-center">No events</p>
                 ) : (
-                  filteredFeed.map((event) => (
+                  mergedFeed.map((event) => (
                     <div key={event.id} className="px-3 py-0.5">
-                      <FeedItem event={event} />
+                      <FeedItem event={event} isNew={newFeedIds.has(event.id)} />
                     </div>
                   ))
                 )}
