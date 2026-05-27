@@ -13,6 +13,11 @@ export type EventType =
   | "high_value"
   | "efficiency_drop"
   | "nominal"
+  | "recovered"
+  | "rank_change"
+  | "latency_trend"
+  | "stability"
+  | "simulation"
 
 export interface RelayPayload {
   slot: string
@@ -305,7 +310,7 @@ function buildFeed(relays: RelayResult[], builders: BuilderResult[]): Intelligen
         id: `${r.slug}-down`,
         type: "degraded",
         severity: "critical",
-        message: `${r.name} unreachable — validators risk missing MEV opportunities`,
+        message: `${r.name} unreachable — validators on this endpoint cannot receive execution bids`,
         relay: r.name,
         chain: r.chain,
         timestamp: now,
@@ -315,7 +320,7 @@ function buildFeed(relays: RelayResult[], builders: BuilderResult[]): Intelligen
         id: `${r.slug}-lat`,
         type: "latency_spike",
         severity: "warning",
-        message: `${r.name} latency spike (${r.latencyMs}ms) — inclusion quality and MEV capture likely degraded`,
+        message: `Response time elevated on ${r.name} (${r.latencyMs}ms) — block inclusion latency above normal operating range`,
         relay: r.name,
         chain: r.chain,
         timestamp: now,
@@ -325,7 +330,7 @@ function buildFeed(relays: RelayResult[], builders: BuilderResult[]): Intelligen
         id: `${r.slug}-degraded`,
         type: "efficiency_drop",
         severity: "warning",
-        message: `${r.name} degradation may reduce validator MEV yield by ~${r.economicImpact.yieldImpactPct}%`,
+        message: `Execution efficiency deteriorating on ${r.name} — estimated ${r.economicImpact.yieldImpactPct}% yield reduction for connected validators`,
         relay: r.name,
         chain: r.chain,
         timestamp: now,
@@ -341,7 +346,7 @@ function buildFeed(relays: RelayResult[], builders: BuilderResult[]): Intelligen
         id: `conc-${chain}`,
         type: "concentration",
         severity: "warning",
-        message: `Builder concentration at ${top.dominancePct.toFixed(1)}% on ${chain} — censorship and MEV extraction risk elevated`,
+        message: `Builder concentration at ${top.dominancePct.toFixed(1)}% on ${chain} — exceeding healthy distribution threshold`,
         chain,
         timestamp: now,
       })
@@ -356,7 +361,7 @@ function buildFeed(relays: RelayResult[], builders: BuilderResult[]): Intelligen
         id: "eff-drop",
         type: "efficiency_drop",
         severity: "warning",
-        message: `Execution efficiency declining — avg relay score ${Math.round(avgScore)}/100, review relay configuration`,
+        message: `System-wide execution quality degraded — composite avg ${Math.round(avgScore)}/100, relay configuration review recommended`,
         timestamp: now,
       })
     }
@@ -370,7 +375,7 @@ function buildFeed(relays: RelayResult[], builders: BuilderResult[]): Intelligen
         id: "high-val",
         type: "high_value",
         severity: "info",
-        message: `High-value execution detected — ${top.shortKey} averaging ${top.avgBidEth.toFixed(6)} ETH/block`,
+        message: `Elevated block values detected via ${top.shortKey} — averaging ${top.avgBidEth.toFixed(6)}Ξ/block`,
         chain: top.chain,
         timestamp: now,
       })
@@ -382,7 +387,7 @@ function buildFeed(relays: RelayResult[], builders: BuilderResult[]): Intelligen
       id: "nominal",
       type: "nominal",
       severity: "info",
-      message: "All systems operating normally — execution quality within expected parameters",
+      message: "Execution conditions nominal across all monitored endpoints",
       timestamp: now,
     })
   }

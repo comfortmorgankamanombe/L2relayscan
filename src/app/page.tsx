@@ -43,6 +43,30 @@ interface CompStats {
   biggestGainerSlug: string | null
   biggestLoserSlug: string | null
   mostStableSlug: string | null
+  bestPerformerSlug: string | null
+  historyWindowMin: number
+}
+
+// ── Temporal helpers ──────────────────────────────────────────────────────────
+
+function countConsecutiveState(
+  slug: string,
+  history: DashboardData[],
+  predicate: (r: RelayResult) => boolean,
+): number {
+  let count = 0
+  for (let i = history.length - 1; i >= 0; i--) {
+    const r = history[i].relays.find((r) => r.slug === slug)
+    if (!r || !predicate(r)) break
+    count++
+  }
+  return count
+}
+
+function fmtDuration(entries: number): string {
+  const seconds = entries * 5
+  if (seconds < 60) return `${seconds}s`
+  return `~${Math.round(seconds / 60)}m`
 }
 
 // ── History-driven computations ───────────────────────────────────────────────
@@ -89,11 +113,13 @@ function computeDeltaEvents(
     const p = prevMap.get(relay.slug)
     if (!p) continue
     if (p.status === "offline" && relay.status === "online") {
+      const downtimeEntries = countConsecutiveState(relay.slug, history, (r) => r.status === "offline")
+      const downtimeStr = downtimeEntries > 0 ? ` after ${fmtDuration(downtimeEntries)} downtime` : ""
       events.push({
         id: `${relay.slug}-recovered-${ts}`,
         type: "recovered",
         severity: "info",
-        message: `${relay.name} back online — execution capacity restored`,
+        message: `${relay.name} relay recovery confirmed${downtimeStr} — execution capacity restored`,
         relay: relay.name,
         chain: relay.chain,
         timestamp: now,
@@ -103,11 +129,16 @@ function computeDeltaEvents(
     if (relay.status !== "online") continue
     const scoreDelta = relay.score.overall - p.score.overall
     if (scoreDelta <= -10) {
+      const degradedFor = countConsecutiveState(
+        relay.slug, history,
+        (r) => r.score.tier !== "OPTIMAL" && r.score.tier !== "GOOD",
+      )
+      const durStr = degradedFor >= 3 ? ` — persisting for ${fmtDuration(degradedFor)}` : ""
       events.push({
         id: `${relay.slug}-drop-${ts}`,
         type: "rank_change",
         severity: "warning",
-        message: `${relay.name} dropped ${Math.abs(scoreDelta)}pts — execution quality declining`,
+        message: `Execution quality degradation on ${relay.name} — composite score declined ${Math.abs(scoreDelta)}pts${durStr}`,
         relay: relay.name,
         chain: relay.chain,
         timestamp: now,
@@ -117,7 +148,7 @@ function computeDeltaEvents(
         id: `${relay.slug}-gain-${ts}`,
         type: "rank_change",
         severity: "info",
-        message: `${relay.name} gained ${scoreDelta}pts — performance recovering`,
+        message: `Recovery trend observed on ${relay.name} — composite score improving (+${scoreDelta}pts)`,
         relay: relay.name,
         chain: relay.chain,
         timestamp: now,
@@ -129,7 +160,7 @@ function computeDeltaEvents(
         id: `${relay.slug}-lat-${ts}`,
         type: "latency_trend",
         severity: "warning",
-        message: `${relay.name} latency +${latDelta}ms → ${relay.latencyMs}ms — monitor MEV inclusion`,
+        message: `Response time divergence on ${relay.name} — elevated to ${relay.latencyMs}ms (+${latDelta}ms from prior reading)`,
         relay: relay.name,
         chain: relay.chain,
         timestamp: now,
@@ -159,7 +190,7 @@ function computeSimEvents(
         id: `sim-fastest-${bucket}`,
         type: "simulation",
         severity: "info",
-        message: `${fastest.name} leads on latency at ${fastest.latencyMs}ms — ${avgLat - fastest.latencyMs}ms below field average`,
+        message: `${fastest.name} leads on response time at ${fastest.latencyMs}ms — ${avgLat - fastest.latencyMs}ms below current field average`,
         relay: fastest.name,
         chain: fastest.chain,
         timestamp: now,
@@ -173,12 +204,12 @@ function computeSimEvents(
     const minScore = Math.min(...scores)
     if (maxScore - minScore > 15) {
       const leader = online.find((r) => r.score.overall === maxScore)!
+      const setLabel = leader.chain === "ethereum" ? "Ethereum relay" : "execution endpoint"
       events.push({
         id: `sim-spread-${bucket}`,
         type: "simulation",
         severity: "info",
-        message: `Quality gap: ${leader.name} at ${maxScore} leads by ${maxScore - minScore}pts — competitive pressure on lower-ranked endpoints`,
-        relay: leader.name,
+        message: `Execution quality divergence across ${setLabel}s — ${maxScore - minScore}pt composite score spread between top and bottom performers`,
         chain: leader.chain,
         timestamp: now,
       })
@@ -189,11 +220,14 @@ function computeSimEvents(
     const scores = online.map((r) => r.score.overall)
     const spread = Math.max(...scores) - Math.min(...scores)
     if (spread <= 5) {
+      const stableFor = history.length >= 3
+        ? ` — confirmed stable for ${fmtDuration(Math.min(history.length, 12))}`
+        : ""
       events.push({
         id: `sim-stable-${bucket}`,
         type: "stability",
         severity: "info",
-        message: `Network stable — all ${online.length} active endpoints within ${spread}pt of each other`,
+        message: `Execution conditions stable across monitored endpoints${stableFor}`,
         timestamp: now,
       })
     }
@@ -210,7 +244,7 @@ function computeSimEvents(
           id: `sim-trend-${bucket}`,
           type: "latency_trend",
           severity: "info",
-          message: `Network trending up — avg score +${Math.round(currentAvg - olderAvg)}pts over last ${history.length * 5}s`,
+          message: `Network health improving — composite avg up ${Math.round(currentAvg - olderAvg)}pts over ${fmtDuration(history.length)} observation window`,
           timestamp: now,
         })
       }
@@ -222,12 +256,13 @@ function computeSimEvents(
 
 function computeCompStats(relays: RelayResult[], history: DashboardData[]): CompStats {
   const online = relays.filter((r) => r.status === "online")
+  const historyWindowMin = Math.round(history.length * 5 / 60)
   const fastestSlug =
     online.length > 0
       ? online.reduce((a, b) => (a.latencyMs < b.latencyMs ? a : b)).slug
       : null
   if (history.length === 0) {
-    return { fastestSlug, biggestGainerSlug: null, biggestLoserSlug: null, mostStableSlug: null }
+    return { fastestSlug, biggestGainerSlug: null, biggestLoserSlug: null, mostStableSlug: null, bestPerformerSlug: null, historyWindowMin: 0 }
   }
   const prev = history[history.length - 1]
   const prevMap = new Map(prev.relays.map((r) => [r.slug, r]))
@@ -243,20 +278,23 @@ function computeCompStats(relays: RelayResult[], history: DashboardData[]): Comp
     if (delta < maxLoss) { maxLoss = delta; biggestLoserSlug = relay.slug }
   }
   let mostStableSlug: string | null = null
+  let bestPerformerSlug: string | null = null
   if (history.length >= 3) {
     let minVariance = Infinity
+    let maxAvgScore = -1
+    const window = history.slice(-Math.min(history.length, 60))
     for (const relay of online) {
-      const scores = history
-        .slice(-3)
+      const scores = window
         .map((h) => h.relays.find((r) => r.slug === relay.slug)?.score.overall ?? null)
         .filter((s): s is number => s !== null)
       if (scores.length < 2) continue
       const avg = scores.reduce((a, b) => a + b, 0) / scores.length
       const variance = scores.reduce((s, v) => s + Math.abs(v - avg), 0)
       if (variance < minVariance) { minVariance = variance; mostStableSlug = relay.slug }
+      if (avg > maxAvgScore) { maxAvgScore = avg; bestPerformerSlug = relay.slug }
     }
   }
-  return { fastestSlug, biggestGainerSlug, biggestLoserSlug, mostStableSlug }
+  return { fastestSlug, biggestGainerSlug, biggestLoserSlug, mostStableSlug, bestPerformerSlug, historyWindowMin }
 }
 
 // ── Primitive badges ──────────────────────────────────────────────────────────
@@ -862,19 +900,23 @@ export default function Dashboard() {
     const relayMap = new Map(data.relays.map((r) => [r.slug, r]))
     if (compStats.fastestSlug) {
       const r = relayMap.get(compStats.fastestSlug)
-      if (r) items.push({ key: "fast", label: `⚡ ${r.name} fastest (${r.latencyMs}ms)`, cls: "text-emerald-400" })
+      if (r) items.push({ key: "fast", label: `⚡ Latency leader: ${r.name} (${r.latencyMs}ms)`, cls: "text-emerald-400" })
     }
     if (compStats.biggestGainerSlug) {
       const r = relayMap.get(compStats.biggestGainerSlug)
-      if (r) items.push({ key: "gain", label: `▲ ${r.name} improving`, cls: "text-sky-400" })
+      if (r) items.push({ key: "gain", label: `↑ ${r.name} largest improvement`, cls: "text-sky-400" })
     }
     if (compStats.biggestLoserSlug) {
       const r = relayMap.get(compStats.biggestLoserSlug)
-      if (r) items.push({ key: "loss", label: `▼ ${r.name} under pressure`, cls: "text-amber-400" })
+      if (r) items.push({ key: "loss", label: `↓ ${r.name} most degraded`, cls: "text-amber-400" })
     }
     if (compStats.mostStableSlug) {
       const r = relayMap.get(compStats.mostStableSlug)
-      if (r) items.push({ key: "stable", label: `◆ ${r.name} most stable`, cls: "text-primary/80" })
+      if (r) items.push({ key: "stable", label: `◆ Stability leader: ${r.name}`, cls: "text-primary/80" })
+    }
+    if (compStats.bestPerformerSlug && compStats.historyWindowMin >= 1) {
+      const r = relayMap.get(compStats.bestPerformerSlug)
+      if (r) items.push({ key: "best", label: `✦ ${r.name} top performer ~${compStats.historyWindowMin}m`, cls: "text-violet-400" })
     }
     return items
   }, [compStats, data.relays])
