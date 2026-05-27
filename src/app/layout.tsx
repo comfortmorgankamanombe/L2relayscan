@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "L2RelayScan — Base MEV Relay Dashboard",
-  description: "Real-time MEV relay stats and block data for Base L2",
+  title: "L2RelayScan — Execution Intelligence Platform",
+  description: "Real-time relay scoring, builder tracking, and execution intelligence for Ethereum and L2 infrastructure.",
 };
 
 export default function RootLayout({
