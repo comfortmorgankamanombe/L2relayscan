@@ -1,29 +1,20 @@
-export type ChainType = "ethereum" | "arbitrum" | "base" | "optimism"
-export type EndpointType = "mev-relay" | "execution-endpoint"
+export type ChainType = "ethereum"
+export type EndpointType = "mev-relay"
 
 export interface RelayConfig {
   name: string
   slug: string
   url: string
-  chain: ChainType
-  endpointType: EndpointType
 }
 
-export const ETHEREUM_RELAYS: RelayConfig[] = [
-  { name: "Flashbots",            slug: "flashbots-eth",     url: "https://boost-relay.flashbots.net",        chain: "ethereum", endpointType: "mev-relay" },
-  { name: "Ultra Sound",          slug: "ultrasound-eth",    url: "https://relay.ultrasound.money",           chain: "ethereum", endpointType: "mev-relay" },
-  { name: "Titan",                slug: "titan-eth",         url: "https://titanrelay.xyz",                   chain: "ethereum", endpointType: "mev-relay" },
-  { name: "Bloxroute Regulated",  slug: "bloxroute-reg-eth", url: "https://bloxroute.regulated.blxrbdn.com",  chain: "ethereum", endpointType: "mev-relay" },
-  { name: "Bloxroute Max Profit", slug: "bloxroute-max-eth", url: "https://bloxroute.max-profit.blxrbdn.com", chain: "ethereum", endpointType: "mev-relay" },
-  { name: "Aestus",               slug: "aestus-eth",        url: "https://mainnet.aestus.live",              chain: "ethereum", endpointType: "mev-relay" },
-  { name: "Agnostic",             slug: "agnostic-eth",      url: "https://agnostic-relay.net",               chain: "ethereum", endpointType: "mev-relay" },
+export const RELAYS: RelayConfig[] = [
+  { name: "Flashbots",            slug: "flashbots",     url: "https://boost-relay.flashbots.net"        },
+  { name: "Ultra Sound",          slug: "ultrasound",    url: "https://relay.ultrasound.money"           },
+  { name: "Titan",                slug: "titan",         url: "https://titanrelay.xyz"                   },
+  { name: "Bloxroute Regulated",  slug: "bloxroute-reg", url: "https://bloxroute.regulated.blxrbdn.com"  },
+  { name: "Bloxroute Max Profit", slug: "bloxroute-max", url: "https://bloxroute.max-profit.blxrbdn.com" },
+  { name: "Aestus",               slug: "aestus",        url: "https://mainnet.aestus.live"              },
+  { name: "Agnostic",             slug: "agnostic",      url: "https://agnostic-relay.net"               },
 ]
-
-export const ARBITRUM_RELAYS: RelayConfig[] = [
-  { name: "Aestus",    slug: "aestus-arb",    url: "https://aestus.live",        chain: "arbitrum", endpointType: "execution-endpoint" },
-  { name: "Pulselink", slug: "pulselink-arb", url: "https://pulselinkrelay.org", chain: "arbitrum", endpointType: "execution-endpoint" },
-]
-
-export const RELAYS: RelayConfig[] = [...ETHEREUM_RELAYS, ...ARBITRUM_RELAYS]
 
 export type RelaySlug = string

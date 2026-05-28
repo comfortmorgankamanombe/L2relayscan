@@ -32,7 +32,6 @@ import type {
   BestRelay,
   EventType,
 } from "@/lib/fetch-relays"
-import type { ChainType } from "@/lib/relay-config"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -85,7 +84,7 @@ function computeRelayTransitions(
     if (p.status === "offline" && relay.status === "online") {
       result.set(relay.slug, "RECOVERING")
     } else if (relay.status !== "online") {
-      // offline relay — no transition label
+      // offline — no transition label
     } else if (relay.score.overall - p.score.overall >= 8) {
       result.set(relay.slug, "IMPROVING")
     } else if (relay.score.overall - p.score.overall <= -8) {
@@ -203,14 +202,12 @@ function computeSimEvents(
     const maxScore = Math.max(...scores)
     const minScore = Math.min(...scores)
     if (maxScore - minScore > 15) {
-      const leader = online.find((r) => r.score.overall === maxScore)!
-      const setLabel = leader.chain === "ethereum" ? "Ethereum relay" : "execution endpoint"
       events.push({
         id: `sim-spread-${bucket}`,
         type: "simulation",
         severity: "info",
-        message: `Execution quality divergence across ${setLabel}s — ${maxScore - minScore}pt composite score spread between top and bottom performers`,
-        chain: leader.chain,
+        message: `Execution quality divergence across MEV relays — ${maxScore - minScore}pt composite score spread between top and bottom performers`,
+        chain: "ethereum",
         timestamp: now,
       })
     }
@@ -227,7 +224,8 @@ function computeSimEvents(
         id: `sim-stable-${bucket}`,
         type: "stability",
         severity: "info",
-        message: `Execution conditions stable across monitored endpoints${stableFor}`,
+        message: `Execution conditions stable across monitored MEV relays${stableFor}`,
+        chain: "ethereum",
         timestamp: now,
       })
     }
@@ -245,6 +243,7 @@ function computeSimEvents(
           type: "latency_trend",
           severity: "info",
           message: `Network health improving — composite avg up ${Math.round(currentAvg - olderAvg)}pts over ${fmtDuration(history.length)} observation window`,
+          chain: "ethereum",
           timestamp: now,
         })
       }
@@ -338,26 +337,11 @@ function EfficBadge({ label }: { label: EfficiencyLabel }) {
   )
 }
 
-const CHAIN_META: Record<ChainType, { label: string; cls: string }> = {
-  ethereum: { label: "ETH",  cls: "text-blue-400   bg-blue-400/10   border-blue-400/25"   },
-  arbitrum: { label: "ARB",  cls: "text-purple-400 bg-purple-400/10 border-purple-400/25" },
-  base:     { label: "BASE", cls: "text-sky-400    bg-sky-400/10    border-sky-400/25"    },
-  optimism: { label: "OP",   cls: "text-red-400    bg-red-400/10    border-red-400/25"    },
-}
-function ChainBadge({ chain }: { chain: ChainType }) {
-  const { label, cls } = CHAIN_META[chain]
-  return (
-    <span className={`inline-flex px-1.5 py-0.5 rounded-sm border text-[9px] font-bold tracking-wider ${cls}`}>
-      {label}
-    </span>
-  )
-}
-
 function ScoreBar({ score, tier }: { score: number; tier: ScoreTier }) {
   const fill =
-    tier === "OPTIMAL" ? "bg-emerald-500" :
-    tier === "GOOD"    ? "bg-amber-400"   :
-    tier === "DEGRADED"? "bg-orange-500"  : "bg-red-500/50"
+    tier === "OPTIMAL"  ? "bg-emerald-500" :
+    tier === "GOOD"     ? "bg-amber-400"   :
+    tier === "DEGRADED" ? "bg-orange-500"  : "bg-red-500/50"
   return (
     <div className="h-1 w-full rounded-full bg-white/5 overflow-hidden">
       <div className={`h-full rounded-full transition-all duration-700 ${fill}`} style={{ width: `${score}%` }} />
@@ -549,11 +533,11 @@ function RelayDetailPane({ relay }: { relay: RelayResult }) {
       </div>
 
       <div>
-        <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-3">Endpoint Info</p>
+        <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-3">Relay Info</p>
         <div className="space-y-2">
           {([
-            { k: "Type",            v: relay.endpointType === "mev-relay" ? "MEV Relay" : "Execution Endpoint" },
-            { k: "Network",         v: relay.chain.charAt(0).toUpperCase() + relay.chain.slice(1) },
+            { k: "Type",            v: "MEV Relay" },
+            { k: "Network",         v: "Ethereum Mainnet" },
             { k: "Blocks Tracked",  v: String(relay.blocksWon) },
             { k: "Composite Score", v: `${relay.score.overall}/100` },
             ...(relay.latestBlock ? [{ k: "Latest Block", v: `#${relay.latestBlock.toLocaleString()}` }] : []),
@@ -589,15 +573,12 @@ function RelayRow({
           <StatusDot status={relay.status} />
           <div>
             <div className="text-sm font-medium leading-tight">{relay.name}</div>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="text-[9px] font-mono text-muted-foreground/50 uppercase tracking-wider">
-                {relay.endpointType === "mev-relay" ? "MEV RELAY" : "EXEC ENDPOINT"}
-              </span>
+            <div className="text-[9px] font-mono text-muted-foreground/50 uppercase tracking-wider mt-0.5">
+              MEV RELAY
             </div>
           </div>
         </div>
       </td>
-      <td className="px-3 py-2.5"><ChainBadge chain={relay.chain} /></td>
       <td className="px-3 py-2.5 w-40">
         <ScoreBar score={relay.score.overall} tier={relay.score.tier} />
         <div className="flex items-center gap-1.5 mt-1 flex-wrap">
@@ -645,7 +626,6 @@ function BuilderRow({ builder, rank }: { builder: BuilderResult; rank: number })
           <span className="font-mono text-xs text-primary">{builder.shortKey}</span>
         </div>
       </td>
-      <td className="px-3 py-2.5"><ChainBadge chain={builder.chain} /></td>
       <td className="px-3 py-2.5 text-right">
         <span className="font-mono text-sm tabular-nums">{builder.blocksWon}</span>
       </td>
@@ -667,11 +647,11 @@ function BuilderRow({ builder, rank }: { builder: BuilderResult; rank: number })
       </td>
       <td className="px-4 py-2.5 hidden lg:table-cell">
         <div className="flex flex-wrap gap-1">
-          {builder.relaysUsed.slice(0, 2).map((r) => (
+          {builder.relaysUsed.slice(0, 3).map((r) => (
             <span key={r} className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-muted/30 text-muted-foreground/70">{r}</span>
           ))}
-          {builder.relaysUsed.length > 2 && (
-            <span className="text-[9px] text-muted-foreground/40">+{builder.relaysUsed.length - 2}</span>
+          {builder.relaysUsed.length > 3 && (
+            <span className="text-[9px] text-muted-foreground/40">+{builder.relaysUsed.length - 3}</span>
           )}
         </div>
       </td>
@@ -701,7 +681,7 @@ function BestRelayCard({ best, isLive }: { best: BestRelay | undefined; isLive: 
         <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-emerald-400">
           <Zap className="h-3 w-3" />BEST RELAY NOW
         </div>
-        <ChainBadge chain={relay.chain} />
+        <span className="text-[9px] font-mono text-muted-foreground/50 uppercase">ETH MAINNET</span>
       </div>
       <div className="flex items-start justify-between gap-2 mb-3">
         <div>
@@ -760,24 +740,10 @@ function SkeletonRow({ cols }: { cols: number }) {
 // ── Default data ──────────────────────────────────────────────────────────────
 
 const defaultData: DashboardData = {
-  relays: [], builders: [], intelligenceFeed: [], bestRelays: {}, recentBlocks: [],
+  relays: [], builders: [], intelligenceFeed: [], bestRelay: undefined, recentBlocks: [],
   totalUniqueBlocks: 0, totalValueEth: 0, activeRelays: 0, totalRelays: 0,
   avgBidEth: 0, avgLatencyMs: 0, systemScore: 0, overallEfficiencyPct: 0,
   fetchedAt: new Date().toISOString(),
-}
-
-type ActiveChain = "all" | ChainType
-const CHAIN_TABS: { id: ActiveChain; label: string }[] = [
-  { id: "all",      label: "ALL CHAINS" },
-  { id: "ethereum", label: "ETHEREUM"   },
-  { id: "arbitrum", label: "ARBITRUM"   },
-]
-const SECTION_TITLE: Record<ActiveChain, string> = {
-  all:      "RELAY STATUS",
-  ethereum: "MEV RELAYS",
-  arbitrum: "EXECUTION ENDPOINTS",
-  base:     "EXECUTION ENDPOINTS",
-  optimism: "EXECUTION ENDPOINTS",
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -792,7 +758,6 @@ export default function Dashboard() {
   const [data, setData] = useState<DashboardData>(defaultData)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [activeChain, setActiveChain] = useState<ActiveChain>("all")
   const [expandedRelays, setExpandedRelays] = useState<Set<string>>(new Set())
   const [newFeedIds, setNewFeedIds] = useState<Set<string>>(new Set())
 
@@ -803,7 +768,6 @@ export default function Dashboard() {
       const res = await fetch("/api/relay-stats")
       if (!res.ok) throw new Error(`Server error ${res.status}`)
       const next: DashboardData = await res.json()
-      // Archive current snapshot before replacing
       if (dataRef.current !== defaultData) {
         historyRef.current.push(dataRef.current)
         if (historyRef.current.length > 60) historyRef.current.shift()
@@ -833,67 +797,40 @@ export default function Dashboard() {
     })
   }, [])
 
-  // Derived data
-  const filteredRelays = useMemo(
-    () => activeChain === "all" ? data.relays : data.relays.filter((r) => r.chain === activeChain),
-    [data.relays, activeChain]
-  )
-  const filteredBuilders = useMemo(
-    () => activeChain === "all" ? data.builders : data.builders.filter((b) => b.chain === activeChain),
-    [data.builders, activeChain]
-  )
-  const filteredFeed = useMemo(
-    () => activeChain === "all"
-      ? data.intelligenceFeed
-      : data.intelligenceFeed.filter((e) => !e.chain || e.chain === activeChain),
-    [data.intelligenceFeed, activeChain]
-  )
-  const bestRelay = useMemo<BestRelay | undefined>(
-    () => activeChain === "all"
-      ? (Object.values(data.bestRelays).filter((v): v is BestRelay => v !== undefined))
-          .sort((a, b) => b.relay.score.overall - a.relay.score.overall)[0]
-      : data.bestRelays[activeChain],
-    [data.bestRelays, activeChain]
-  )
   const criticalCount = useMemo(
     () => data.intelligenceFeed.filter((e) => e.severity === "critical").length,
     [data.intelligenceFeed]
   )
 
-  // History-driven memos
   const deltaEvents = useMemo(
     () => computeDeltaEvents(data, historyRef.current),
     [data]
   )
   const relayTransitions = useMemo(
-    () => computeRelayTransitions(filteredRelays, historyRef.current),
-    [filteredRelays]
+    () => computeRelayTransitions(data.relays, historyRef.current),
+    [data.relays]
   )
   const simEvents = useMemo(() => {
     const alertCount =
       deltaEvents.filter((e) => e.severity !== "info").length +
-      filteredFeed.filter((e) => e.severity !== "info").length
-    return computeSimEvents(filteredRelays, historyRef.current, alertCount)
-  }, [filteredRelays, deltaEvents, filteredFeed])
+      data.intelligenceFeed.filter((e) => e.severity !== "info").length
+    return computeSimEvents(data.relays, historyRef.current, alertCount)
+  }, [data.relays, data.intelligenceFeed, deltaEvents])
 
   const compStats = useMemo(
-    () => computeCompStats(filteredRelays, historyRef.current),
-    [filteredRelays]
+    () => computeCompStats(data.relays, historyRef.current),
+    [data.relays]
   )
 
   const mergedFeed = useMemo((): IntelligenceEvent[] => {
     const severityOrder: Record<string, number> = { critical: 0, warning: 1, info: 2 }
-    const chainDelta =
-      activeChain === "all"
-        ? deltaEvents
-        : deltaEvents.filter((e) => !e.chain || e.chain === activeChain)
-    const all = [...chainDelta, ...filteredFeed, ...simEvents]
+    const all = [...deltaEvents, ...data.intelligenceFeed, ...simEvents]
     const seen = new Set<string>()
     return all
       .filter((e) => (seen.has(e.id) ? false : (seen.add(e.id), true)))
       .sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity])
       .slice(0, 20)
-  }, [deltaEvents, filteredFeed, simEvents, activeChain])
+  }, [deltaEvents, data.intelligenceFeed, simEvents])
 
   const compStripItems = useMemo(() => {
     const items: Array<{ key: string; label: string; cls: string }> = []
@@ -921,7 +858,6 @@ export default function Dashboard() {
     return items
   }, [compStats, data.relays])
 
-  // Feed animation: highlight newly arrived events
   useEffect(() => {
     const freshIds = new Set<string>()
     for (const e of mergedFeed) {
@@ -936,7 +872,6 @@ export default function Dashboard() {
   }, [mergedFeed])
 
   const isLive = !loading
-  const sectionTitle = SECTION_TITLE[activeChain]
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -948,30 +883,22 @@ export default function Dashboard() {
             <Layers className="h-4 w-4 text-primary" />
             <div className="leading-none">
               <span className="font-bold text-sm tracking-tight">
-                L2RELAY<span className="text-primary">SCAN</span>
+                MEV<span className="text-primary">SCAN</span>
               </span>
               <span className="hidden sm:inline ml-2 text-[9px] uppercase tracking-[0.18em] text-muted-foreground">
-                Execution Intelligence
+                Relay Intelligence
               </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-0.5 bg-muted/20 rounded border border-border/40 p-0.5">
-            {CHAIN_TABS.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => setActiveChain(c.id)}
-                className={`px-2.5 py-1 text-[10px] font-bold tracking-wider rounded transition-all ${
-                  activeChain === c.id
-                    ? "bg-primary/20 text-primary border border-primary/30"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {c.label}
-              </button>
-            ))}
+          {/* Network badge */}
+          <div className="flex items-center gap-2 bg-blue-400/8 border border-blue-400/20 rounded px-2.5 py-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-blue-400 shrink-0" />
+            <span className="text-[10px] font-bold tracking-wider text-blue-400">ETHEREUM MAINNET</span>
+            <span className="hidden sm:inline text-[9px] text-muted-foreground/50 ml-1">· MEV-Boost Relay Infrastructure</span>
           </div>
 
+          {/* Right status */}
           <div className="flex items-center gap-3 shrink-0">
             {criticalCount > 0 && (
               <div className="hidden sm:flex items-center gap-1 text-[10px] font-bold text-red-400 animate-pulse">
@@ -1028,7 +955,7 @@ export default function Dashboard() {
           <MetricTile
             label="Unique Blocks" icon={Blocks}
             value={loading ? "—" : data.totalUniqueBlocks.toLocaleString()}
-            sub="deduped across all relays"
+            sub="deduped across relay set"
           />
           <MetricTile
             label="Avg Block Value" icon={TrendingUp}
@@ -1041,14 +968,14 @@ export default function Dashboard() {
         {/* ── Main grid ── */}
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
 
-          {/* Relay status — 8 cols */}
+          {/* MEV Relay status — 8 cols */}
           <div className="xl:col-span-8">
             <Panel
               icon={Server}
-              title={sectionTitle}
+              title="MEV Relays"
               right={
                 <span className="flex items-center gap-2">
-                  <span>{filteredRelays.length} endpoints</span>
+                  <span>{data.relays.length} relays monitored</span>
                   <span className="opacity-30">·</span>
                   <LastUpdatedBadge fetchedAt={data.fetchedAt} isLive={isLive} />
                 </span>
@@ -1058,8 +985,7 @@ export default function Dashboard() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr>
-                      <TH>Endpoint</TH>
-                      <TH>Net</TH>
+                      <TH>Relay</TH>
                       <TH>Score</TH>
                       <TH hidden="hidden sm:table-cell">Efficiency</TH>
                       <TH>Latency</TH>
@@ -1070,15 +996,15 @@ export default function Dashboard() {
                   </thead>
                   <tbody>
                     {loading ? (
-                      Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} cols={8} />)
-                    ) : filteredRelays.length === 0 ? (
+                      Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} cols={7} />)
+                    ) : data.relays.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="px-4 py-12 text-center text-sm text-muted-foreground">
-                          No endpoints for selected chain
+                        <td colSpan={7} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                          No relay data available
                         </td>
                       </tr>
                     ) : (
-                      filteredRelays.map((relay) => (
+                      data.relays.map((relay) => (
                         <Fragment key={relay.slug}>
                           <RelayRow
                             relay={relay}
@@ -1088,7 +1014,7 @@ export default function Dashboard() {
                           />
                           {expandedRelays.has(relay.slug) && (
                             <tr>
-                              <td colSpan={8} className="p-0">
+                              <td colSpan={7} className="p-0">
                                 <RelayDetailPane relay={relay} />
                               </td>
                             </tr>
@@ -1111,9 +1037,7 @@ export default function Dashboard() {
               )}
 
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 border-t border-border/20 bg-card/20">
-                <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider">
-                  Score weights:
-                </span>
+                <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider">Score weights:</span>
                 {[["Uptime","40%"],["Latency","30%"],["Delivery","20%"],["Value","10%"]].map(([l, p]) => (
                   <span key={l} className="text-[10px] text-muted-foreground/50">
                     {l} <span className="text-primary/50">{p}</span>
@@ -1128,7 +1052,7 @@ export default function Dashboard() {
 
           {/* Side panel — 4 cols */}
           <div className="xl:col-span-4 flex flex-col gap-4">
-            <BestRelayCard best={bestRelay} isLive={isLive} />
+            <BestRelayCard best={data.bestRelay} isLive={isLive} />
 
             <Panel
               icon={Globe}
@@ -1156,7 +1080,7 @@ export default function Dashboard() {
           title="Builder Performance"
           right={
             <span className="flex items-center gap-2">
-              <span>{filteredBuilders.length} builders</span>
+              <span>{data.builders.length} builders tracked</span>
               <span className="opacity-30">·</span>
               <LastUpdatedBadge fetchedAt={data.fetchedAt} isLive={isLive} />
             </span>
@@ -1167,7 +1091,6 @@ export default function Dashboard() {
               <thead>
                 <tr>
                   <TH>Builder</TH>
-                  <TH>Net</TH>
                   <TH right>Blocks</TH>
                   <TH>Market Share</TH>
                   <TH right hidden="hidden md:table-cell">Avg Bid</TH>
@@ -1176,16 +1099,16 @@ export default function Dashboard() {
               </thead>
               <tbody>
                 {loading ? (
-                  Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} cols={6} />)
-                ) : filteredBuilders.length === 0 ? (
+                  Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} cols={5} />)
+                ) : data.builders.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-12 text-center text-sm text-muted-foreground">
-                      No builder data — relay feed may be empty
+                    <td colSpan={5} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                      No builder data — relay payload feed may be empty
                     </td>
                   </tr>
                 ) : (
-                  filteredBuilders.slice(0, 15).map((b, i) => (
-                    <BuilderRow key={`${b.pubkey}-${b.chain}`} builder={b} rank={i + 1} />
+                  data.builders.slice(0, 15).map((b, i) => (
+                    <BuilderRow key={b.pubkey} builder={b} rank={i + 1} />
                   ))
                 )}
               </tbody>
@@ -1199,9 +1122,9 @@ export default function Dashboard() {
         <div className="max-w-screen-2xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-[10px] text-muted-foreground/40 uppercase tracking-wider">
           <div className="flex items-center gap-2">
             <Layers className="h-3 w-3" />
-            L2RelayScan · Execution Observability Platform
+            MEVScan · Ethereum Execution Observability
           </div>
-          <span>Live relay APIs · MEV relays + execution endpoints · 5s refresh</span>
+          <span>Live MEV-Boost relay APIs · Ethereum Mainnet · 5s refresh</span>
         </div>
       </footer>
     </div>

@@ -1,14 +1,14 @@
-# L2RelayScan
+# MEVScan
 
-Real-time execution observability platform for Ethereum MEV relay infrastructure and Arbitrum execution endpoints.
+Real-time Ethereum MEV relay infrastructure observability.
 
 ---
 
 ## Overview
 
-L2RelayScan monitors MEV relay and execution endpoint performance across Ethereum mainnet and Arbitrum One. It provides composite scoring, economic impact analysis, builder concentration tracking, and a live intelligence feed — giving infrastructure operators a continuous read on execution quality across the monitored relay set.
+MEVScan monitors MEV-Boost relay performance across Ethereum mainnet. It provides composite scoring, economic impact analysis, builder concentration tracking, and a live intelligence feed — giving infrastructure operators a continuous read on execution quality across the monitored relay set.
 
-The platform is designed for operators, validators, and researchers who need operational visibility into relay health, latency divergence, block delivery rates, and builder market structure.
+The platform is designed for validators, operators, and researchers who need operational visibility into relay health, latency divergence, block delivery rates, and builder market structure.
 
 ---
 
@@ -16,7 +16,7 @@ The platform is designed for operators, validators, and researchers who need ope
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  Next.js App Router (v16)                               │
+│  Next.js App Router                                     │
 │                                                         │
 │  src/app/page.tsx          ← Client dashboard           │
 │  src/app/api/relay-stats/  ← API route (Node runtime)   │
@@ -27,7 +27,7 @@ The platform is designed for operators, validators, and researchers who need ope
           │  HTTP (parallel, per relay)
           ▼
 ┌─────────────────────────────────────────────────────────┐
-│  External Relay APIs                                    │
+│  MEV-Boost Relay APIs                                   │
 │                                                         │
 │  /eth/v1/builder/status              ← liveness probe   │
 │  /relay/v1/data/bidtraces/           ← payload data     │
@@ -39,11 +39,9 @@ All relay probes are performed server-side via the `/api/relay-stats` route on e
 
 ---
 
-## Monitored Systems
+## Monitored Relays
 
-### Ethereum — MEV Relays
-
-MEV-boost compatible relays that receive builder blocks and deliver them to Ethereum validators. These implement the MEV-boost relay specification.
+MEV-Boost compatible relays that receive builder blocks and deliver them to Ethereum validators. All implement the MEV-Boost relay specification.
 
 | Relay | Endpoint |
 |---|---|
@@ -55,17 +53,6 @@ MEV-boost compatible relays that receive builder blocks and deliver them to Ethe
 | Aestus | mainnet.aestus.live |
 | Agnostic | agnostic-relay.net |
 
-### Arbitrum One — Execution Endpoints
-
-Block building and relay endpoints specific to Arbitrum One. These do not use the MEV-boost protocol and have a different API surface; they are monitored via equivalent liveness and payload endpoints.
-
-| Endpoint | URL |
-|---|---|
-| Aestus | aestus.live |
-| Pulselink | pulselinkrelay.org |
-
-> Ethereum MEV relays and Arbitrum execution endpoints serve different architectural roles and should not be compared directly. The composite scoring system is applied uniformly as a proxy for operational health.
-
 ---
 
 ## Scoring Methodology
@@ -76,12 +63,12 @@ Each relay receives a composite score (0–100) computed from four weighted comp
 |---|---|---|
 | Uptime | 40% | Binary: online vs unreachable |
 | Latency | 30% | Response time to liveness endpoint, normalized 0–100 |
-| Delivery | 20% | Block delivery count relative to best peer on same chain |
-| Value | 10% | Average bid ETH relative to best peer on same chain |
+| Delivery | 20% | Block delivery count relative to best peer |
+| Value | 10% | Average bid ETH relative to best peer |
 
 **Latency normalization:** `max(0, 100 - latencyMs / 8)` — a relay responding at 800ms scores 0; at 0ms it scores 100.
 
-**Delivery and value scores** are peer-relative within each chain. The highest-performing relay scores 100; others are scaled proportionally. This makes the score a measure of relative execution quality, not absolute performance.
+**Delivery and value scores** are peer-relative. The highest-performing relay scores 100; others are scaled proportionally. This makes the score a measure of relative execution quality, not absolute performance.
 
 **Score tiers:**
 
@@ -167,7 +154,7 @@ interface DashboardData {
   relays: RelayResult[]           // Scored, sorted by composite score desc
   builders: BuilderResult[]       // Sorted by blocks won desc
   intelligenceFeed: IntelligenceEvent[]
-  bestRelays: Partial<Record<ChainType, BestRelay>>
+  bestRelay: BestRelay | undefined
   recentBlocks: RecentBlock[]
   totalUniqueBlocks: number
   activeRelays: number
@@ -223,7 +210,6 @@ npx vercel --prod
 
 - Historical relay performance persistence for multi-hour trend views
 - Webhook/notification support for critical relay events
-- Optimism and Base execution endpoint monitoring
 - Named builder identity resolution from known pubkey registry
 - Latency percentile tracking (p50/p95/p99) per relay
 - API authentication for institutional operator access

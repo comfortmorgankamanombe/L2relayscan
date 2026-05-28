@@ -100,7 +100,7 @@ export interface DashboardData {
   relays: RelayResult[]
   builders: BuilderResult[]
   intelligenceFeed: IntelligenceEvent[]
-  bestRelays: Partial<Record<ChainType, BestRelay>>
+  bestRelay: BestRelay | undefined
   recentBlocks: RecentBlock[]
   totalUniqueBlocks: number
   totalValueEth: number
@@ -202,17 +202,9 @@ type RawEntry = {
 }
 
 function scoreEntries(entries: RawEntry[]): RelayResult[] {
-  const byChain = new Map<ChainType, RawEntry[]>()
-  for (const e of entries) {
-    const list = byChain.get(e.relay.chain) ?? []
-    list.push(e)
-    byChain.set(e.relay.chain, list)
-  }
+  const online = entries.filter((e) => e.probe.status === "online")
 
   return entries.map((e) => {
-    const peers = byChain.get(e.relay.chain) ?? []
-    const online = peers.filter((p) => p.probe.status === "online")
-
     const latencyScore =
       e.probe.status === "offline" ? 0 : Math.max(0, 100 - e.probe.latencyMs / 8)
 
@@ -243,8 +235,8 @@ function scoreEntries(entries: RawEntry[]): RelayResult[] {
       name: e.relay.name,
       slug: e.relay.slug,
       url: e.relay.url,
-      chain: e.relay.chain,
-      endpointType: e.relay.endpointType,
+      chain: "ethereum" as const,
+      endpointType: "mev-relay" as const,
       status: e.probe.status,
       latencyMs: e.probe.latencyMs,
       blocksWon: e.blocksWon,
@@ -262,14 +254,9 @@ function scoreEntries(entries: RawEntry[]): RelayResult[] {
 function trackBuilders(
   pairs: Array<{ result: RelayResult; payloads: RelayPayload[] }>
 ): BuilderResult[] {
-  const byChain = new Map<
-    ChainType,
-    Map<string, { blocks: number; value: number; relays: Set<string> }>
-  >()
+  const map = new Map<string, { blocks: number; value: number; relays: Set<string> }>()
 
   for (const { result, payloads } of pairs) {
-    let map = byChain.get(result.chain)
-    if (!map) { map = new Map(); byChain.set(result.chain, map) }
     for (const p of payloads) {
       const b = map.get(p.builder_pubkey) ?? { blocks: 0, value: 0, relays: new Set<string>() }
       b.blocks++
@@ -279,21 +266,19 @@ function trackBuilders(
     }
   }
 
+  const total = Array.from(map.values()).reduce((s, b) => s + b.blocks, 0)
   const out: BuilderResult[] = []
-  for (const [chain, map] of byChain) {
-    const total = Array.from(map.values()).reduce((s, b) => s + b.blocks, 0)
-    for (const [pubkey, b] of map) {
-      out.push({
-        pubkey,
-        shortKey: abbrevKey(pubkey),
-        blocksWon: b.blocks,
-        totalValueEth: b.value,
-        avgBidEth: b.blocks > 0 ? b.value / b.blocks : 0,
-        dominancePct: total > 0 ? (b.blocks / total) * 100 : 0,
-        relaysUsed: Array.from(b.relays),
-        chain,
-      })
-    }
+  for (const [pubkey, b] of map) {
+    out.push({
+      pubkey,
+      shortKey: abbrevKey(pubkey),
+      blocksWon: b.blocks,
+      totalValueEth: b.value,
+      avgBidEth: b.blocks > 0 ? b.value / b.blocks : 0,
+      dominancePct: total > 0 ? (b.blocks / total) * 100 : 0,
+      relaysUsed: Array.from(b.relays),
+      chain: "ethereum",
+    })
   }
   return out.sort((a, b) => b.blocksWon - a.blocksWon)
 }
@@ -338,19 +323,16 @@ function buildFeed(relays: RelayResult[], builders: BuilderResult[]): Intelligen
     }
   }
 
-  const chains = new Set(builders.map((b) => b.chain))
-  for (const chain of chains) {
-    const top = builders.filter((b) => b.chain === chain)[0]
-    if (top && top.dominancePct > 50) {
-      events.push({
-        id: `conc-${chain}`,
-        type: "concentration",
-        severity: "warning",
-        message: `Builder concentration at ${top.dominancePct.toFixed(1)}% on ${chain} — exceeding healthy distribution threshold`,
-        chain,
-        timestamp: now,
-      })
-    }
+  const topBuilder = builders[0]
+  if (topBuilder && topBuilder.dominancePct > 50) {
+    events.push({
+      id: "conc-eth",
+      type: "concentration",
+      severity: "warning",
+      message: `Builder concentration at ${topBuilder.dominancePct.toFixed(1)}% — exceeding healthy distribution threshold on Ethereum`,
+      chain: "ethereum",
+      timestamp: now,
+    })
   }
 
   const online = relays.filter((r) => r.status === "online")
@@ -398,28 +380,21 @@ function buildFeed(relays: RelayResult[], builders: BuilderResult[]): Intelligen
 
 // ── Best relay selection ──────────────────────────────────────────────────────
 
-function selectBest(relays: RelayResult[]): Partial<Record<ChainType, BestRelay>> {
-  const result: Partial<Record<ChainType, BestRelay>> = {}
-  const chains = new Set(relays.map((r) => r.chain))
-
-  for (const chain of chains) {
-    const candidates = relays.filter((r) => r.chain === chain && r.status === "online")
-    if (candidates.length === 0) continue
-    const best = candidates[0]
-    const reasons: string[] = []
-    if (best.score.latency >= 80) reasons.push(`Fast response (${best.latencyMs}ms)`)
-    if (best.score.delivery >= 80) reasons.push("High block delivery rate")
-    if (best.economicImpact.label === "HIGH EFFICIENCY") reasons.push("Optimal MEV capture quality")
-    if (best.score.value >= 80) reasons.push("Strong block value")
-    if (reasons.length === 0) reasons.push("Best available on this network")
-    result[chain] = {
-      relay: best,
-      confidence: Math.min(98, best.score.overall + 5),
-      reasons,
-    }
+function selectBest(relays: RelayResult[]): BestRelay | undefined {
+  const candidates = relays.filter((r) => r.status === "online")
+  if (candidates.length === 0) return undefined
+  const best = candidates[0]
+  const reasons: string[] = []
+  if (best.score.latency >= 80) reasons.push(`Fast response (${best.latencyMs}ms)`)
+  if (best.score.delivery >= 80) reasons.push("High block delivery rate")
+  if (best.economicImpact.label === "HIGH EFFICIENCY") reasons.push("Optimal MEV capture quality")
+  if (best.score.value >= 80) reasons.push("Strong block value")
+  if (reasons.length === 0) reasons.push("Best available on network")
+  return {
+    relay: best,
+    confidence: Math.min(98, best.score.overall + 5),
+    reasons,
   }
-
-  return result
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -461,7 +436,7 @@ export async function fetchDashboardData(): Promise<DashboardData> {
     .slice(0, 30)
 
   const intelligenceFeed = buildFeed(relays, builders)
-  const bestRelays = selectBest(relays)
+  const bestRelay = selectBest(relays)
 
   const online = relays.filter((r) => r.status === "online")
   const totalValueEth = recentBlocks.reduce((s, b) => s + b.valueEth, 0)
@@ -481,7 +456,7 @@ export async function fetchDashboardData(): Promise<DashboardData> {
     relays,
     builders,
     intelligenceFeed,
-    bestRelays,
+    bestRelay,
     recentBlocks,
     totalUniqueBlocks: blockMap.size,
     totalValueEth,
