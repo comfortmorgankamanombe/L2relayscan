@@ -15,6 +15,7 @@ export const RELAYS: RelayConfig[] = [
   { name: "Bloxroute Max Profit", slug: "bloxroute-max", url: "https://bloxroute.max-profit.blxrbdn.com" },
   { name: "Aestus",               slug: "aestus",        url: "https://mainnet.aestus.live"              },
   { name: "Agnostic",             slug: "agnostic",      url: "https://agnostic-relay.net"               },
+  { name: "PulseLink",            slug: "pulselink",     url: "https://pulselinkrelay.org"                },
 ]
 
 export type RelaySlug = string
